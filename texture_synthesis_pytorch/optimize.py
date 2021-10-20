@@ -12,7 +12,7 @@ import model
 import matplotlib.pyplot as plt
 
 class Optimizer:
-    def __init__(self, model: model.Model, args: Namespace, start_image: None):
+    def __init__(self, model: model.Model, args: Namespace, start_image=None):
         self.model = model
         self.n_steps = args.n_steps
         self.checkpoint_every = args.checkpoint_every
