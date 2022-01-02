@@ -85,8 +85,8 @@ terminado==0.12.1
 testpath==0.5.0
 threadpoolctl==3.0.0
 timm==0.4.12
-torch==1.5.1
-torchvision==0.6.1
+torch==1.8.1
+torchvision==0.9.1
 tornado==6.1
 tqdm==4.62.3
 traitlets==5.1.0
