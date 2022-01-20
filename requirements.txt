@@ -14,9 +14,11 @@ decorator==5.1.0
 defusedxml==0.7.1
 docker-pycreds==0.4.0
 entrypoints==0.3
+fastrlock==0.8
 future==0.18.2
 gitdb==4.0.7
 GitPython==3.1.24
+h5py==3.6.0
 idna==3.2
 importlib-metadata==4.8.1
 ipykernel==6.4.1
