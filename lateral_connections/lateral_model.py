@@ -462,7 +462,7 @@ class LateralModel:
         
     def save_model(self, file_path:str=None):
         if not file_path:
-            file_path = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + '.h5'
+            file_path = 'models/lateral_models/' + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + '.h5'
 
         with h5py.File(file_path, 'w') as f:
             lg = f.create_group('lateral_model')
