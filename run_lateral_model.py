@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from lateral_connections import NewerLateralModel, NewLateralModel, LateralModel, VggModel, CustomImageDataset
+from lateral_connections import LateralModel, VggModel, CustomImageDataset
 
 def main():
     model_path = 'models/VGG19_normalized_avg_pool_pytorch'
@@ -22,14 +22,14 @@ def main():
     # last_h = list()
     # last_s = list()
 
-    img, _ = ds[0]
-    model.forward(img)
+    # img, _ = ds[0]
+    # model.forward(img)
 
-    model.save_model('blub.h5')
-    import code; code.interact(local=dict(globals(), **locals()))
+    # model.save_model('blub.h5')
+    # import code; code.interact(local=dict(globals(), **locals()))
 
 
-    exit()
+    # exit()
 
 
 
