@@ -1,6 +1,8 @@
 data/
 images/
 epoch_images/
+wandb/
+models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
