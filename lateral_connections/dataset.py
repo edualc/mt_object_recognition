@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision.io.image import read_image
 
 
@@ -31,6 +31,10 @@ class CustomImageDataset(Dataset):
         
         return image, label
 
+    def get_batch(self, n):
+        return next(iter(DataLoader(self, batch_size=n, shuffle=True)))
+
+
 def main():
     IMG_DIR = 'images/geometric_dataset'
     IMG_FILE_ENDING = '.png'
@@ -58,6 +62,7 @@ def main():
     # df.to_csv(os.path.join(IMG_DIR, 'annotations.csv'), index=False)
 
     d = CustomImageDataset(os.path.join(IMG_DIR, 'annotations.csv'))
+    x = d.get_batch(8)
 
 
 if __name__ == '__main__':

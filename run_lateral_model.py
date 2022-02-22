@@ -7,12 +7,16 @@ def main():
     model_path = 'models/VGG19_normalized_avg_pool_pytorch'
     # vm = VggModel(model_path, torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     vm = VggModel(model_path, torch.device('cuda' if torch.cuda.is_available() else 'cpu'), important_layers=['relu1_1', 'pool1', 'pool2'])
-    model = LateralModel(vgg_model=vm, distance=2, num_output_repetitions=4, horizon_length=512)
 
     def torch_transform(img):
-        return img.reshape((1,) + img.shape).float()
+        # return img.reshape((1,) + img.shape).float()
+        return img.float()
 
     ds = CustomImageDataset('images/geometric_dataset/annotations.csv', image_transform=torch_transform)
+
+    model = LateralModel(vgg_model=vm, dataset=ds, distance=2, num_output_repetitions=4)
+
+
 
     import matplotlib.pyplot as plt
     from tqdm import tqdm
