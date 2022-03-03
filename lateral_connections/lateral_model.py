@@ -3,10 +3,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torchvision.transforms as transforms
 
-from character_models import MNISTVgg, OmniglotVgg
-from dataset import CustomImageDataset
-from torch_utils import *
-from vgg_model import VggModel
+from .character_models import MNISTVgg, OmniglotVgg
+from .dataset import CustomImageDataset
+from .torch_utils import *
+from .vgg_model import VggModel
 
 from tqdm import tqdm
 from collections import OrderedDict
@@ -23,7 +23,7 @@ pretrained_models = {
     'Omniglot': { 'class': OmniglotVgg, 'path': None, 'dataset_path': 'images/omniglot/' }
 }
 
-class AddGaussianNoise(object):
+class AddGaussianNoise:
     def __init__(self, mean=0., std=1.):
         self.std = std
         self.mean = mean
@@ -54,7 +54,6 @@ class VggLateral(nn.Module):
         pretrained_model_path = pretrained_models[dataset_name]['path']
         self.pretrained_vgg.load_model(pretrained_model_path)
         self.device = self.pretrained_vgg.device
-        self.loss_fn = self.pretrained_vgg.loss_fn
         self.num_classes = self.pretrained_vgg.num_classes
 
         self.train_loader = self.pretrained_vgg.train_loader
@@ -100,18 +99,18 @@ class VggLateral(nn.Module):
         x = self.classifier(x)
         return x
 
-    def test(self, noise=False):
+    def test(self, noise=False, loader=None):
         self.eval()
 
-        if noise:
-            loader = self.noise_test_loader
-        else:
-            loader = self.test_loader
+        if loader is None:
+            if noise:
+                loader = self.noise_test_loader
+            else:
+                loader = self.test_loader
 
         with torch.no_grad():
             correct = 0
             total = 0
-            total_loss = 0
             counter = 0
 
             desc = f"Evaluating {self.dataset_name} test data {'with' if noise else 'without'} noise."
@@ -122,18 +121,13 @@ class VggLateral(nn.Module):
 
                 outputs = self(images)
                 _, preds = torch.max(outputs, 1)
-                
-                loss = self.loss_fn(outputs, labels)
 
                 correct += (preds == labels).sum().item()
                 total += labels.size(0)
-                total_loss += loss.item()
         
-            total_loss /= counter
             acc = correct/total
 
-        print(f"\tAccuracy: {acc:1.4f}\tLoss: {total_loss:1.4f}")
-        return acc, total_loss
+        return acc
 
 
 class LateralModel:
