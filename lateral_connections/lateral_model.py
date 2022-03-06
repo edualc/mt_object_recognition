@@ -20,7 +20,7 @@ import copy
 
 pretrained_models = {
     'MNIST': { 'class': MNISTVgg, 'path': 'models/character_vgg/MNIST_pretrained.pt', 'dataset_path': 'images/mnist/' },
-    'Omniglot': { 'class': OmniglotVgg, 'path': None, 'dataset_path': 'images/omniglot/' }
+    # 'Omniglot': { 'class': OmniglotVgg, 'path': None, 'dataset_path': 'images/omniglot/' }
 }
 
 class AddGaussianNoise:
@@ -35,17 +35,23 @@ class AddGaussianNoise:
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 class LaterallyConnectedLayer(nn.Module):
-    def __init__(self):
+    def __init__(self, n, num_fm, fm_height, fm_width):
         super().__init__()
+        self.n = n
+        self.num_fm = num_fm
+        self.fm_height = fm_height
+        self.fm_width = fm_width
+
 
     def forward(self, x):
         return x
 
 
 class VggLateral(nn.Module):
-    def __init__(self, dataset_name):
+    def __init__(self, dataset_name, num_crosstalk_replications=4):
         super().__init__()
         self.dataset_name = dataset_name
+        self.num_crosstalk_replications = num_crosstalk_replications
 
         char_model_class = pretrained_models[dataset_name]['class']
         dataset_path = pretrained_models[dataset_name]['dataset_path']
@@ -69,17 +75,19 @@ class VggLateral(nn.Module):
         self._build_lcl_vgg()
 
     def _build_lcl_vgg(self):
-        self.features = nn.Sequential(OrderedDict([
-            ('pool1', self.pretrained_vgg.net.features[:5]),
-            ('lcl1',  LaterallyConnectedLayer()),
-            ('pool2', self.pretrained_vgg.net.features[5:10]),
-            ('lcl2',  LaterallyConnectedLayer()),
-            ('pool3', self.pretrained_vgg.net.features[10:19]),
-            ('lcl3',  LaterallyConnectedLayer()),
-            ('pool4', self.pretrained_vgg.net.features[19:28]),
-            ('lcl4',  LaterallyConnectedLayer()),
-            ('pool5', self.pretrained_vgg.net.features[28:]),
-        ]))
+        self.features = nn.Sequential(
+            OrderedDict([
+                ('pool1', self.pretrained_vgg.net.features[:5]),
+                ('lcl1',  LaterallyConnectedLayer(num_crosstalk_replications, 64, 112, 112)),
+                ('pool2', self.pretrained_vgg.net.features[5:10]),
+                ('lcl2',  LaterallyConnectedLayer(num_crosstalk_replications, 128, 56, 56)),
+                ('pool3', self.pretrained_vgg.net.features[10:19]),
+                ('lcl3',  LaterallyConnectedLayer(num_crosstalk_replications, 256, 28, 28)),
+                ('pool4', self.pretrained_vgg.net.features[19:28]),
+                ('lcl4',  LaterallyConnectedLayer(num_crosstalk_replications, 512, 14, 14)),
+                ('pool5', self.pretrained_vgg.net.features[28:]),
+            ])
+        )
         self.avgpool = self.pretrained_vgg.net.avgpool
         self.classifier = self.pretrained_vgg.net.classifier
         self.eval()
