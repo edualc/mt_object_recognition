@@ -23,27 +23,190 @@ pretrained_models = {
     # 'Omniglot': { 'class': OmniglotVgg, 'path': None, 'dataset_path': 'images/omniglot/' }
 }
 
-class AddGaussianNoise:
-    def __init__(self, mean=0., std=1.):
-        self.std = std
-        self.mean = mean
-        
-    def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
-    
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
+# PyTorch layer implementation of the laterally connected layer (LCL)
+#
+# Arguments:
+# - n:              Number of multiplex cells (repetitions to reduce crosstalk)
+# - num_fm:         Number of input feature maps
+# - fm_height:      Height of input feature maps (in pixels)
+# - fm_width:       Width of input feature maps (in pixels)
+# - d:              Distance away from center pixel in the kernel, for 3x3 choose 1
+# - prd:            Padding repair distance, how thick the border around activations is
+#                       fixed with symmetric padding, to alleviate border effect artifacts
+#
+# TODO: Check out torchfund for performance tips / hooks
+#   https://github.com/szymonmaszke/torchfunc
+# Pytorch Hooks:
+#   https://pytorch.org/tutorials/beginner/former_torchies/nnft_tutorial.html#forward-and-backward-function-hooks
+#
 class LaterallyConnectedLayer(nn.Module):
-    def __init__(self, n, num_fm, fm_height, fm_width):
+    def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
+        alpha=0.01, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, mu_batch_size=128, num_cell_dynamic_iterations=1):
         super().__init__()
+        self.disabled = disabled
+        self.update = update
+        self.iterations_trained = 0
+        # TODO: How can I get the self.device filled here?
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
         self.n = n
+        self.d = d
+        self.k = 2*self.d + 1
+        self.prd = num_padding_repair_distance
         self.num_fm = num_fm
         self.fm_height = fm_height
         self.fm_width = fm_width
 
+        self.alpha = alpha                          # Rate at which the kernel K is changed by K_change
+        self.beta = beta                            # Adjustment rate of mean output per FM
+        self.gamma = gamma                          # Adjustment rate of FM strength
+        self.eta = eta                              # Parameter to control the amount of noise added to the feature maps
+        self.theta = theta                          # Rate at which each cell dynamic iteration changes A
+        self.mu_batch_size = mu_batch_size          # Number of images from dataset to calculate initial :mu
+        self.t_dyn = num_cell_dynamic_iterations        
 
-    def forward(self, x):
+        self.K = torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k), device=self.device)
+        # lehl@2022-02-10: Applying softmax helps to keep these values somewhat bounded and to
+        # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
+        self.K = softmax_on_fm(self.K)
+
+        self.K_change = None
+        self.L = None
+        self.O = None
+
+        # Initialization of S, M and mu, saving the scaling factor of each
+        # lateral connection and its historical average
+        # TODO: Initialize with a sensible mean, taken from a sample of 
+        self.mu = torch.ones((self.n * self.num_fm,), device=self.device) / self.n
+        self.S = torch.clone(self.mu)
+        self.M = torch.clone(self.mu)
+
+    # This method expects a batch of m images to be passed as A,
+    # giving it the shape (m, F, H, W)
+    #
+    def forward(self, A):
+        # If the layer is turned off, pass the data through without any changes
+        #
+        if self.disabled:
+            return A
+
+        batch_size = A.shape[0]
+        A = self.symm_pad(A, self.prd)
+
+        # Introduce N identical feature cells to reduce cross talk
+        # Multiplied feature maps are treated as feature maps on the same level, i.e.
+        # for activations A of shape (32, 100, 50, 50) and n=4, we expect the new A to
+        # be of shape (32, 4*100, 50, 50) with (bs, a, i, j) == (bs, a + 100, i, j)
+        #
+        self.A = torch.broadcast_to(A, (batch_size,) + (self.n,) + A.shape[1:]).reshape((batch_size,) + (self.n * A.shape[1],) + A.shape[2:])
+
+        if self.update:
+            # lehl@2022-02-04: Add noise to help break the symmetry
+            #
+            noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.gpu_device)
+            self.A = torch.clip(self.A + self.eta * noise, min=0.0)
+
+            # Lateral Connection Reinforcement
+            #
+            self.K_change = torch.zeros(size=self.K.shape, device=self.gpu_device)
+
+            for a in range(self.K.shape[1]):
+                for x in range(self.K.shape[2]):
+                    for y in range(self.K.shape[3]):
+                        # All the feature maps that influence the activation
+                        #
+                        xoff_f = - self.d + x
+                        yoff_f = - self.d + y
+                        source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
+                        
+                        # The activation to be influenced
+                        #
+                        xoff_i = self.d - x
+                        yoff_i = self.d - y
+                        target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
+
+                        # Divide by the number of feature maps used, to scale down the kernel
+                        #
+                        self.K_change[:, a, x, y] = torch.sum(source_feature_maps * target_feature_map, dim=(1,2)) / (self.K.shape[0] * batch_size)
+            
+            # Additional normalization because of the potential number of height and width pixels summed
+            #
+            self.K_change /= (self.K.shape[-2] * self.K.shape[-1])
+
+            # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
+            # that we have no over- or underflows over time. 
+            #
+            # should hold: | alpha * K_change + (1 - alpha) * K | === 1
+            #
+            self.K_change = softmax_on_fm(self.K_change)
+            self.K = ((1 - self.alpha) * self.K) + self.alpha * self.K_change
+
+        # Replicate for timekeeping / debugging
+        self.A = torch.broadcast_to(self.A, (self.t_dyn,) + self.A.shape)
+        self.O = torch.zeros(size=self.A.shape, device=self.gpu_device)
+
+        for t in range(self.t_dyn):
+            # Applying the Kernel Convolution
+            #
+            # lehl@2022-01-26: When using padding=d, the resulting activation maps include
+            # artefacts at the image borders where activations are unusually high/low.
+            #
+            # lehl@2022-01-28: Add symmetrical padding to A bevor applying the convolution,
+            # then do the convolution with valid padding
+            #
+            self.padded_A = torch.zeros(self.A.shape[1:-2] + (self.prd*self.d + self.A.shape[-2], self.prd*self.d + self.A.shape[-1]), dtype=self.A.dtype, device=self.gpu_device)
+            # copy over A into padded A
+            self.padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = self.A[t, ...]
+            # fix borders for padded A (use 2x prd, otherwise we have two identical mirrorings)
+            self.padded_A = self.symm_pad(self.padded_A, 2*self.prd)
+
+            # lehl@2022-02-10: Add softmax to the kernel on each feature map before the convolution step,
+            # such that the unbounded ratios are bounded
+            #
+            self.L = F.conv2d(self.padded_A, minmax_on_fm(self.K.transpose_(0, 1)), padding=0) / num_fm
+
+            # Apply Softmax to L, then MinMax Scaling, so that the final values
+            # are in the range of [0, 1], reaching from 0 to 1
+            #
+            self.L = softmax_minmax_scaled(self.L)
+
+            # Activation Scaling
+            #
+            # TODO: Do I need to alter self.S further? (unsqueeze 0?)
+            self.O[t, ...] = self.A[t, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1)
+            
+            if t < self.t_dyn - 1:
+                self.A[t+1, ...] = (1 - self.theta) * self.A[t, ...] + self.theta * self.A[t, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1)
+
+        if self.update:
+            # Update the mean and down-/upscale the feature map strengths
+            self.M = (1 - self.beta) * self.M + self.beta * torch.mean(self.A[-1, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1), dim=(-2,-1))
+            self.S = torch.clip(self.S + self.gamma * (self.mu - self.M), min=0.0, max=1.0)
+
+        # Keep track of number of training iterations
+        #
+        self.iterations_trained += 1 if self.update else 0
+
+        return self.O[-1, ...]
+
+    # Symmetric padding to fix potential border effect artifacts
+    # around the borders of feature map activations.
+    #
+    # - x:          Feature map data
+    # - prd:        Padding repair distance,
+    #                   how many pixels are repaired around the edges
+    #
+    def symm_pad(self, x, prd):
+        # Check pytorch discussion on symmetric padding implementation:
+        # https://discuss.pytorch.org/t/symmetric-padding/19866
+        #
+        # lehl@2022-01-26: Repairing of the padding border effect by
+        # applying a symmetric padding of the affected area
+        #
+        x[...,:prd,:] = torch.flip(x[...,prd:2*prd,:], dims=(-2,))         # top edge
+        x[...,-prd:,:] = torch.flip(x[...,-2*prd:-prd,:], dims=(-2,))      # bottom edge
+        x[...,:,:prd] = torch.flip(x[...,:,prd:2*prd], dims=(-1,))         # left edge
+        x[...,:,-prd:] = torch.flip(x[...,:,-2*prd:-prd], dims=(-1,))      # right edge
         return x
 
 
@@ -65,12 +228,12 @@ class VggLateral(nn.Module):
         self.train_loader = self.pretrained_vgg.train_loader
         self.test_loader = self.pretrained_vgg.test_loader
 
-        # Add noisy testdata variant
-        self.noise_test_dataset = copy.deepcopy(self.pretrained_vgg.test_dataset)
-        self.noise_test_dataset.transform = self._noise_transform()
-        self.noise_test_loader = torch.utils.data.DataLoader(
-            self.noise_test_dataset, batch_size=self.test_loader.batch_size,
-            shuffle=False, num_workers=4, pin_memory=True)
+        # # Add noisy testdata variant
+        # self.noise_test_dataset = copy.deepcopy(self.pretrained_vgg.test_dataset)
+        # self.noise_test_dataset.transform = self._noise_transform()
+        # self.noise_test_loader = torch.utils.data.DataLoader(
+        #     self.noise_test_dataset, batch_size=self.test_loader.batch_size,
+        #     shuffle=False, num_workers=4, pin_memory=True)
 
         self._build_lcl_vgg()
 
@@ -78,27 +241,19 @@ class VggLateral(nn.Module):
         self.features = nn.Sequential(
             OrderedDict([
                 ('pool1', self.pretrained_vgg.net.features[:5]),
-                ('lcl1',  LaterallyConnectedLayer(num_crosstalk_replications, 64, 112, 112)),
+                ('lcl1',  LaterallyConnectedLayer(num_crosstalk_replications, 64, 112, 112, d=2)),
                 ('pool2', self.pretrained_vgg.net.features[5:10]),
-                ('lcl2',  LaterallyConnectedLayer(num_crosstalk_replications, 128, 56, 56)),
+                ('lcl2',  LaterallyConnectedLayer(num_crosstalk_replications, 128, 56, 56, d=2)),
                 ('pool3', self.pretrained_vgg.net.features[10:19]),
-                ('lcl3',  LaterallyConnectedLayer(num_crosstalk_replications, 256, 28, 28)),
+                ('lcl3',  LaterallyConnectedLayer(num_crosstalk_replications, 256, 28, 28, d=2)),
                 ('pool4', self.pretrained_vgg.net.features[19:28]),
-                ('lcl4',  LaterallyConnectedLayer(num_crosstalk_replications, 512, 14, 14)),
+                ('lcl4',  LaterallyConnectedLayer(num_crosstalk_replications, 512, 14, 14, d=2)),
                 ('pool5', self.pretrained_vgg.net.features[28:]),
             ])
         )
         self.avgpool = self.pretrained_vgg.net.avgpool
         self.classifier = self.pretrained_vgg.net.classifier
         self.eval()
-
-    def _noise_transform(self):
-        return transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=(0.5), std=(0.5)),
-            AddGaussianNoise(0., 1.)
-        ])
 
     def forward(self, x):
         x = self.features(x)
