@@ -3,10 +3,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torchvision.transforms as transforms
 
-from .character_models import MNISTVgg, OmniglotVgg
-from .dataset import CustomImageDataset
-from .torch_utils import *
-from .vgg_model import VggModel
+from character_models import MNISTVgg, OmniglotVgg
+from dataset import CustomImageDataset
+from torch_utils import *
+from vgg_model import VggModel
 
 from tqdm import tqdm
 from collections import OrderedDict
@@ -52,7 +52,7 @@ class LaterallyConnectedLayer(nn.Module):
         self.n = n
         self.d = d
         self.k = 2*self.d + 1
-        self.prd = num_padding_repair_distance
+        self.prd = prd
         self.num_fm = num_fm
         self.fm_height = fm_height
         self.fm_width = fm_width
@@ -80,6 +80,9 @@ class LaterallyConnectedLayer(nn.Module):
         self.mu = torch.ones((self.n * self.num_fm,), device=self.device) / self.n
         self.S = torch.clone(self.mu)
         self.M = torch.clone(self.mu)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)})"
 
     # This method expects a batch of m images to be passed as A,
     # giving it the shape (m, F, H, W)
@@ -241,13 +244,13 @@ class VggLateral(nn.Module):
         self.features = nn.Sequential(
             OrderedDict([
                 ('pool1', self.pretrained_vgg.net.features[:5]),
-                ('lcl1',  LaterallyConnectedLayer(num_crosstalk_replications, 64, 112, 112, d=2)),
+                ('lcl1',  LaterallyConnectedLayer(self.num_crosstalk_replications, 64, 112, 112, d=2)),
                 ('pool2', self.pretrained_vgg.net.features[5:10]),
-                ('lcl2',  LaterallyConnectedLayer(num_crosstalk_replications, 128, 56, 56, d=2)),
+                ('lcl2',  LaterallyConnectedLayer(self.num_crosstalk_replications, 128, 56, 56, d=2)),
                 ('pool3', self.pretrained_vgg.net.features[10:19]),
-                ('lcl3',  LaterallyConnectedLayer(num_crosstalk_replications, 256, 28, 28, d=2)),
+                ('lcl3',  LaterallyConnectedLayer(self.num_crosstalk_replications, 256, 28, 28, d=2)),
                 ('pool4', self.pretrained_vgg.net.features[19:28]),
-                ('lcl4',  LaterallyConnectedLayer(num_crosstalk_replications, 512, 14, 14, d=2)),
+                ('lcl4',  LaterallyConnectedLayer(self.num_crosstalk_replications, 512, 14, 14, d=2)),
                 ('pool5', self.pretrained_vgg.net.features[28:]),
             ])
         )
