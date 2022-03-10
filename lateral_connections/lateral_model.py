@@ -41,7 +41,7 @@ pretrained_models = {
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.01, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, mu_batch_size=128, num_cell_dynamic_iterations=1):
+        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, mu_batch_size=128, num_cell_dynamic_iterations=1):
         super().__init__()
         self.disabled = disabled
         self.update = update
@@ -69,7 +69,6 @@ class LaterallyConnectedLayer(nn.Module):
         # lehl@2022-02-10: Applying softmax helps to keep these values somewhat bounded and to
         # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
         self.K = softmax_on_fm(self.K)
-
         self.K_change = None
         self.L = None
         self.O = None
@@ -84,10 +83,111 @@ class LaterallyConnectedLayer(nn.Module):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)})"
 
+    def pad_activations(self, A):
+        padded_A = torch.zeros(A.shape[:-2] + (self.prd*self.d+A.shape[-2], self.prd*self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
+        padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = A
+        return self.symm_pad(padded_A, 2*self.prd)
+
+    def forward(self, A):
+        if self.disabled:
+            return A
+
+        with torch.no_grad():
+            batch_size = A.shape[0]
+
+            # Symmetric padding fix to remove border effect issues from 0-padding
+            A = self.symm_pad(A, self.prd)
+
+            # Generate multiplex cells
+            self.A = A.repeat(1, self.n, 1, 1)
+
+            # Add noise
+            noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.device)
+            self.A = torch.clip(self.A + self.eta * noise, min=0.0)
+
+            # generate padded A for convolution
+            self.padded_A = self.pad_activations(self.A)
+            # self.padded_A = torch.zeros(self.A.shape[:-2] + (self.prd*self.d + self.A.shape[-2], self.prd*self.d + self.A.shape[-1]), dtype=self.A.dtype, device=self.device)
+            # self.padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = self.A
+            # self.padded_A = self.symm_pad(self.padded_A, 2*self.prd)
+            
+            # Calculate initial lateral connections
+            self.L = F.conv2d(self.padded_A, minmax_on_fm(self.K.transpose_(0, 1)), padding=0) / self.num_fm
+            self.L = softmax_minmax_scaled(self.L)
+
+            # Calculate A_hat, perform convolution (L) and add to intial input
+            self.A_hat = self.A + self.L
+
+            # find the maximum multiplex cells for each multiple (n)
+            self.A_max = torch.sum(self.A_hat, dim=(-2,-1))
+            self.A_max = self.A_max.reshape((self.A_max.shape[0], self.n, self.A_max.shape[1]//self.n))
+            self.A_max = torch.argmax(torch.transpose(self.A_max,2,1), dim=-1)
+
+            # Get the argmax indices inside the multiplex cells for each sample in the batch
+            # TODO: How to index the kernel / activations with them?
+            fm_indices = self.A_max.shape[1] * self.A_max + torch.arange(0, self.A_max.shape[1]).to(self.device)
+            filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(self.A, fm_indices)])
+
+            k_indices = torch.repeat_interleave(fm_indices.unsqueeze(-1), fm_indices.shape[1], dim=2)
+
+            # Build idx of disabled multiplex cells
+            inverse_fm_idx = torch.zeros((batch_size, self.A.shape[1] - fm_indices.shape[1]), device=self.device).to(torch.long)
+            for b in range(batch_size):
+                uniqs, cnts = torch.cat((torch.arange(self.A.shape[1]).to(self.device), fm_indices[b,:])).unique(return_counts=True)
+                inverse_fm_idx[b,:] = uniqs[cnts==1]
+
+            # Lateral Connection Reinforcement
+            self.K_change = torch.zeros(size=self.K.shape, device=self.device)
+            for a in tqdm(range(self.K.shape[1])):
+                for x in range(self.K.shape[2]):
+                    for y in range(self.K.shape[3]):
+                        xoff_f = - self.d + x
+                        yoff_f = - self.d + y
+                        source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
+                        
+                        xoff_i = self.d - x
+                        yoff_i = self.d - y
+                        target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
+
+                        tmp = torch.sum(torch.transpose(source_feature_maps, 0, 1) * target_feature_map, axis=(-2,-1)) / (self.K.shape[0] * batch_size)
+                        tmp = torch.transpose(tmp, 0, 1)
+
+                        # inhibit inactive multiplex cell changes
+                        for b in range(batch_size):
+                            tmp[b, inverse_fm_idx[b,:]] = 0
+
+                        self.K_change[:, a, x, y] = torch.sum(tmp, dim=0)
+
+            self.K_change = minmax_on_fm(self.K_change)
+            
+            # Update kernel
+            self.K = ((1 - self.alpha) * self.K) + self.alpha * self.K_change
+
+            # Calculate output
+            A = self.A
+            large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
+            for b in range(batch_size):
+                large_K[b, inverse_fm_idx[b,:], inverse_fm_idx[b,:], :, :] = 0
+                A[b, inverse_fm_idx[b,:], ...] = 0
+
+            padded_A = self.pad_activations(A)
+
+            L = torch.zeros((batch_size, self.n*self.num_fm, self.fm_height, self.fm_width), device=self.device)
+
+            for b in range(batch_size):
+                L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
+
+            filtered_L = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(L, fm_indices)])
+            filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(A, fm_indices)])
+            self.O = filtered_A + self.theta * filtered_L
+
+            return self.O
+
+
     # This method expects a batch of m images to be passed as A,
     # giving it the shape (m, F, H, W)
     #
-    def forward(self, A):
+    def forward_old(self, A):
         # If the layer is turned off, pass the data through without any changes
         #
         if self.disabled:
@@ -531,5 +631,8 @@ class LateralModel:
 
 if __name__ == '__main__':
     m = VggLateral('MNIST')
+    bs, bl = next(iter(m.train_loader),0)
+    m.features.lcl2.disabled = False
 
+    m(bs.to(torch.device('cuda')))
     import code; code.interact(local=dict(globals(), **locals()))

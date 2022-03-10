@@ -21,7 +21,7 @@ def softmax_on_fm(t: torch.Tensor):
     # lehl@2022-02-10: Needs to be run through numpy, as torch is much more
     # sensible to over- and underflow issues, rounding up to infinity or down to 0
     #
-    t_np = t.cpu().numpy()
+    t_np = t.cpu().detach().numpy()
 
     z = t_np - np.max(t_np)
     y_exp = np.exp(z)
