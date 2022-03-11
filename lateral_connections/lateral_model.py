@@ -3,10 +3,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torchvision.transforms as transforms
 
-from character_models import MNISTVgg, OmniglotVgg
-from dataset import CustomImageDataset
-from torch_utils import *
-from vgg_model import VggModel
+from .character_models import MNISTVgg, OmniglotVgg
+from .dataset import CustomImageDataset
+from .torch_utils import *
+from .vgg_model import VggModel
 
 from tqdm import tqdm
 from collections import OrderedDict
@@ -81,7 +81,7 @@ class LaterallyConnectedLayer(nn.Module):
         self.M = torch.clone(self.mu)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)})"
+        return f"{'' if self.disabled else '*'}{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)}, update={str(self.update)})"
 
     def pad_activations(self, A):
         padded_A = torch.zeros(A.shape[:-2] + (self.prd*self.d+A.shape[-2], self.prd*self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
@@ -136,32 +136,33 @@ class LaterallyConnectedLayer(nn.Module):
                 uniqs, cnts = torch.cat((torch.arange(self.A.shape[1]).to(self.device), fm_indices[b,:])).unique(return_counts=True)
                 inverse_fm_idx[b,:] = uniqs[cnts==1]
 
-            # Lateral Connection Reinforcement
-            self.K_change = torch.zeros(size=self.K.shape, device=self.device)
-            for a in tqdm(range(self.K.shape[1])):
-                for x in range(self.K.shape[2]):
-                    for y in range(self.K.shape[3]):
-                        xoff_f = - self.d + x
-                        yoff_f = - self.d + y
-                        source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
-                        
-                        xoff_i = self.d - x
-                        yoff_i = self.d - y
-                        target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
+            if self.update:
+                # Lateral Connection Reinforcement
+                self.K_change = torch.zeros(size=self.K.shape, device=self.device)
+                for a in range(self.K.shape[1]):
+                    for x in range(self.K.shape[2]):
+                        for y in range(self.K.shape[3]):
+                            xoff_f = - self.d + x
+                            yoff_f = - self.d + y
+                            source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
+                            
+                            xoff_i = self.d - x
+                            yoff_i = self.d - y
+                            target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
 
-                        tmp = torch.sum(torch.transpose(source_feature_maps, 0, 1) * target_feature_map, axis=(-2,-1)) / (self.K.shape[0] * batch_size)
-                        tmp = torch.transpose(tmp, 0, 1)
+                            tmp = torch.sum(torch.transpose(source_feature_maps, 0, 1) * target_feature_map, axis=(-2,-1)) / (self.K.shape[0] * batch_size)
+                            tmp = torch.transpose(tmp, 0, 1)
 
-                        # inhibit inactive multiplex cell changes
-                        for b in range(batch_size):
-                            tmp[b, inverse_fm_idx[b,:]] = 0
+                            # inhibit inactive multiplex cell changes
+                            for b in range(batch_size):
+                                tmp[b, inverse_fm_idx[b,:]] = 0
 
-                        self.K_change[:, a, x, y] = torch.sum(tmp, dim=0)
+                            self.K_change[:, a, x, y] = torch.sum(tmp, dim=0)
 
-            self.K_change = minmax_on_fm(self.K_change)
-            
-            # Update kernel
-            self.K = ((1 - self.alpha) * self.K) + self.alpha * self.K_change
+                self.K_change = minmax_on_fm(self.K_change)
+                
+                # Update kernel
+                self.K = ((1 - self.alpha) * self.K) + self.alpha * self.K_change
 
             # Calculate output
             A = self.A
@@ -186,7 +187,7 @@ class LaterallyConnectedLayer(nn.Module):
 
     # This method expects a batch of m images to be passed as A,
     # giving it the shape (m, F, H, W)
-    #
+    #was 
     def forward_old(self, A):
         # If the layer is turned off, pass the data through without any changes
         #
@@ -365,21 +366,18 @@ class VggLateral(nn.Module):
         x = self.classifier(x)
         return x
 
-    def test(self, noise=False, loader=None):
+    def test(self, loader=None):
         self.eval()
 
         if loader is None:
-            if noise:
-                loader = self.noise_test_loader
-            else:
-                loader = self.test_loader
+            loader = self.test_loader
 
         with torch.no_grad():
             correct = 0
             total = 0
             counter = 0
 
-            desc = f"Evaluating {self.dataset_name} test data {'with' if noise else 'without'} noise."
+            desc = f"Evaluating {self.dataset_name} test data."
             for i, (images, labels) in tqdm(enumerate(loader, 0), total=len(loader), desc=desc):
                 counter += 1
                 images = images.to(self.device)
