@@ -1,5 +1,9 @@
 import numpy as np
 import torch
+import sys
+
+def tensor_size(t: torch.Tensor):
+    return sys.getsizeof(t.storage())
 
 # Applies first the softmax, then minmax scaling to the given tensor, keeping
 # the dimensions in tact.

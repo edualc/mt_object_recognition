@@ -3,10 +3,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torchvision.transforms as transforms
 
-from .character_models import MNISTVgg, OmniglotVgg
-from .dataset import CustomImageDataset
-from .torch_utils import *
-from .vgg_model import VggModel
+from character_models import MNISTVgg, OmniglotVgg
+from dataset import CustomImageDataset
+from torch_utils import *
+from vgg_model import VggModel
 
 from tqdm import tqdm
 from collections import OrderedDict
@@ -92,6 +92,8 @@ class LaterallyConnectedLayer(nn.Module):
         if self.disabled:
             return A
 
+        # TODO: Pavel said no
+        # check if grad is still there in layers around
         with torch.no_grad():
             batch_size = A.shape[0]
 
@@ -139,25 +141,71 @@ class LaterallyConnectedLayer(nn.Module):
             if self.update:
                 # Lateral Connection Reinforcement
                 self.K_change = torch.zeros(size=self.K.shape, device=self.device)
-                for a in range(self.K.shape[1]):
-                    for x in range(self.K.shape[2]):
-                        for y in range(self.K.shape[3]):
-                            xoff_f = - self.d + x
-                            yoff_f = - self.d + y
-                            source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
+                # import code; code.interact(local=dict(globals(), **locals()))
+
+                # A:    [16, 512, 56, 56] (batch_size, feature_maps*4 (multiple), fm_x, fm_y)
+                # K:    [512, 512, 5, 5] (featuremaps*4, featuremaps*4, kernel_size_x, kernel_size_y)
+
+                # #FM1    #FM2
+                # abcd    abcd    => a*a + b*b + c*c ... 
+                # efgh    efgh       a*b + b*c + c*d ...
+                # ijkl    ijkl
+                # mnop    mnop        f*a; f*b; f*c; f*e; f*f; f*g; f*i, f*j; f*k
+
+                # source -> as is + shift
+                # target -> introduce dimension 
+                # --> matmul together
+
+                for x in range(self.K.shape[-2]):
+                    for y in range(self.K.shape[-1]):
+
+                        xoff_f = - self.d + x
+                        yoff_f = - self.d + y
+                        source_fms = self.A[:, :, max(0,xoff_f):self.A.shape[-2]+min(xoff_f,0), max(0,yoff_f):self.A.shape[-1]+min(0,yoff_f)]
+                        source_fms = source_fms.transpose(0,1)
+
+                        xoff_i = self.d - x
+                        yoff_i = self.d - y
+                        target_fms = self.A[:, :, max(0,xoff_i):self.A.shape[-2]+min(xoff_i,0), max(0,yoff_i):self.A.shape[-1]+min(0,yoff_i)]
+                        target_fms = target_fms.transpose(0,1).unsqueeze(1)
+
+                        # calculate the product of all feature maps (source) together with the
+                        # to-be-influenced feature map (target) efficiently
+                        #
+                        tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
+                        
+                        # inhibit inactive multiplex cell changes
+                        #
+                        for b in range(batch_size):
+                            tmp[b, inverse_fm_idx[b,:]] = 0
+
+                        # Average across the batch size
+                        #
+                        self.K_change[:, :, x, y] = torch.sum(tmp, dim=0) / batch_size
+                        # import code; code.interact(local=dict(globals(), **locals()))
+
+                # for a in range(self.K.shape[1]): # 512
+                #     for x in range(self.K.shape[2]): # 5
+                #         for y in range(self.K.shape[3]): # 5
+                #             xoff_f = - self.d + x
+                #             yoff_f = - self.d + y
+                #             source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
                             
-                            xoff_i = self.d - x
-                            yoff_i = self.d - y
-                            target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
+                #             xoff_i = self.d - x
+                #             yoff_i = self.d - y
+                #             target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
 
-                            tmp = torch.sum(torch.transpose(source_feature_maps, 0, 1) * target_feature_map, axis=(-2,-1)) / (self.K.shape[0] * batch_size)
-                            tmp = torch.transpose(tmp, 0, 1)
+                #             # import code; code.interact(local=dict(globals(), **locals()))
 
-                            # inhibit inactive multiplex cell changes
-                            for b in range(batch_size):
-                                tmp[b, inverse_fm_idx[b,:]] = 0
 
-                            self.K_change[:, a, x, y] = torch.sum(tmp, dim=0)
+                #             tmp = torch.sum(torch.transpose(source_feature_maps, 0, 1) * target_feature_map, axis=(-2,-1)) / (self.K.shape[0] * batch_size)
+                #             tmp = torch.transpose(tmp, 0, 1)
+
+                #             # inhibit inactive multiplex cell changes
+                #             for b in range(batch_size):
+                #                 tmp[b, inverse_fm_idx[b,:]] = 0
+
+                #             self.K_change[:, a, x, y] = torch.sum(tmp, dim=0)
 
                 self.K_change = minmax_on_fm(self.K_change)
                 
@@ -182,6 +230,9 @@ class LaterallyConnectedLayer(nn.Module):
             filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(A, fm_indices)])
             self.O = filtered_A + self.theta * filtered_L
 
+            # import code; code.interact(local=dict(globals(), **locals()))
+
+            # TODO: check, that self.O has requires_grad=True/keeps it from A
             return self.O
 
 
@@ -315,9 +366,10 @@ class LaterallyConnectedLayer(nn.Module):
 
 
 class VggLateral(nn.Module):
-    def __init__(self, dataset_name, num_crosstalk_replications=4):
+    def __init__(self, dataset_name, batch_size=16, num_crosstalk_replications=4):
         super().__init__()
         self.dataset_name = dataset_name
+        self.batch_size = batch_size
         self.num_crosstalk_replications = num_crosstalk_replications
 
         char_model_class = pretrained_models[dataset_name]['class']
@@ -329,15 +381,14 @@ class VggLateral(nn.Module):
         self.device = self.pretrained_vgg.device
         self.num_classes = self.pretrained_vgg.num_classes
 
-        self.train_loader = self.pretrained_vgg.train_loader
-        self.test_loader = self.pretrained_vgg.test_loader
-
-        # # Add noisy testdata variant
-        # self.noise_test_dataset = copy.deepcopy(self.pretrained_vgg.test_dataset)
-        # self.noise_test_dataset.transform = self._noise_transform()
-        # self.noise_test_loader = torch.utils.data.DataLoader(
-        #     self.noise_test_dataset, batch_size=self.test_loader.batch_size,
-        #     shuffle=False, num_workers=4, pin_memory=True)
+        self.train_loader = torch.utils.data.DataLoader(
+            self.pretrained_vgg.train_dataset, batch_size=self.batch_size,
+            shuffle=True, num_workers=4, pin_memory=True
+        )
+        self.test_loader = torch.utils.data.DataLoader(
+            self.pretrained_vgg.test_dataset, batch_size=self.batch_size,
+            shuffle=False, num_workers=4, pin_memory=True
+        )
 
         self._build_lcl_vgg()
 
