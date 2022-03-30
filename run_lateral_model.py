@@ -17,9 +17,9 @@ def main():
     model = VggWithLCL(num_classes, learning_rate=0.003, dropout=0.2, num_multiplex=4)
     model.features.lcl3.enable()
 
-    train_loader = torch.utils.data.DataLoader(load_mnist(train=True), batch_size=20, shuffle=True, num_workers=1)
-    test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=20, shuffle=False, num_workers=1)
-    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=20, shuffle=False, num_workers=1)
+    train_loader = torch.utils.data.DataLoader(load_mnist(train=True), batch_size=10, shuffle=True, num_workers=1)
+    test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=10, shuffle=False, num_workers=1)
+    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=10, shuffle=False, num_workers=1)
     
     model.train_with_loader(train_loader, num_epochs=1)
     import code; code.interact(local=dict(globals(), **locals()))

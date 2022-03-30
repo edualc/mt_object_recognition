@@ -91,6 +91,7 @@ class VggWithLCL(nn.Module):
         )
         self.avgpool = self.net.avgpool
         self.classifier = self.net.classifier
+        self.to(self.device)
         del self.net
     
     def forward(self, x):
@@ -100,11 +101,11 @@ class VggWithLCL(nn.Module):
         x = self.classifier(x)
         return x
 
-    def train_with_loader(self, dataset_loader, num_epochs=25):
-        total_params = sum(p.numel() for p in self.net.parameters())
+    def train_with_loader(self, dataset_loader, num_epochs=5):
+        total_params = sum(p.numel() for p in self.parameters())
         print(f"[INFO]: {total_params:,} total parameters.")
         total_trainable_params = sum(
-            p.numel() for p in self.net.parameters() if p.requires_grad)
+            p.numel() for p in self.parameters() if p.requires_grad)
         print(f"[INFO]: {total_trainable_params:,} trainable parameters.")
 
         for epoch in range(num_epochs):
@@ -125,7 +126,7 @@ class VggWithLCL(nn.Module):
 
                 self.optimizer.zero_grad()
 
-                outputs = self.net(images)
+                outputs = self(images)
                 loss = self.loss_fn(outputs, labels)
                 
                 loss.backward()
@@ -136,6 +137,9 @@ class VggWithLCL(nn.Module):
                 correct += (preds == labels).sum().item()
                 total += labels.size(0)
                 total_loss += (loss.item() / labels.size(0))
+
+                if (i % 10) == 0:
+                    print('[Iteration ' + str(i) + ']\tloss: ', total_loss/counter, ' accuracy: ', correct/total)
 
             total_loss /= counter
             acc = correct / total
@@ -151,11 +155,13 @@ class VggWithLCL(nn.Module):
                 "val_acc:",    f"{round(val_acc, 4):1.4f}"
             ])
             print(log_msg)
-            wandb.log({ 'loss': total_loss, 'acc': acc, 'val_loss': val_loss, 'val_acc': val_acc })
-            self.save_model(epoch)
-
+            # wandb.log({ 'loss': total_loss, 'acc': acc, 'val_loss': val_loss, 'val_acc': val_acc })
+            # self.save_model(epoch)
 
     def test(self, dataset_loader):
+        return 0, 0
+
+    def save_model(self, epoch):
         pass
 
 
