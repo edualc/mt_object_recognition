@@ -100,8 +100,60 @@ class VggWithLCL(nn.Module):
         x = self.classifier(x)
         return x
 
-    def train(self, dataset_loader):
-        pass
+    def train_with_loader(self, dataset_loader, num_epochs=25):
+        total_params = sum(p.numel() for p in self.net.parameters())
+        print(f"[INFO]: {total_params:,} total parameters.")
+        total_trainable_params = sum(
+            p.numel() for p in self.net.parameters() if p.requires_grad)
+        print(f"[INFO]: {total_trainable_params:,} trainable parameters.")
+
+        for epoch in range(num_epochs):
+            print(f"[INFO]: Epoch {epoch} of {num_epochs}")
+
+            self.train()
+
+            correct = 0
+            total = 0
+            total_loss = 0
+            counter = 0
+
+            # Training Loop
+            for i, (images, labels) in tqdm(enumerate(dataset_loader, 0), total=len(dataset_loader), desc='Training'):
+                counter += 1
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                self.optimizer.zero_grad()
+
+                outputs = self.net(images)
+                loss = self.loss_fn(outputs, labels)
+                
+                loss.backward()
+                self.optimizer.step()
+
+                _, preds = torch.max(outputs, 1)
+        
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+                total_loss += (loss.item() / labels.size(0))
+
+            total_loss /= counter
+            acc = correct / total
+
+            # Validation Loop
+            val_acc, val_loss = self.test()
+
+            log_msg = ''.join([
+                "Epoch",       f"{epoch+1:2d}",                 "\t",
+                "loss:",       f"{round(total_loss, 4):1.4f}",  "\t",
+                "acc:",        f"{round(acc, 4):1.4f}",         "\t",
+                "val_loss:",   f"{round(val_loss, 4):1.4f}",    "\t",
+                "val_acc:",    f"{round(val_acc, 4):1.4f}"
+            ])
+            print(log_msg)
+            wandb.log({ 'loss': total_loss, 'acc': acc, 'val_loss': val_loss, 'val_acc': val_acc })
+            self.save_model(epoch)
+
 
     def test(self, dataset_loader):
         pass

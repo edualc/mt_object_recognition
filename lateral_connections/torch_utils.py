@@ -11,6 +11,26 @@ def tensor_size(t: torch.Tensor):
 def softmax_minmax_scaled(t: torch.Tensor):
     return minmax_on_fm(softmax_on_fm(t))
 
+# Symmetric padding to fix potential border effect artifacts
+# around the borders of feature map activations.
+#
+# - x:          Feature map data
+# - prd:        Padding repair distance,
+#                   how many pixels are repaired around the edges
+#
+def symmetric_padding(x: torch.Tensor, prd: int):
+    # Check pytorch discussion on symmetric padding implementation:
+    # https://discuss.pytorch.org/t/symmetric-padding/19866
+    #
+    # lehl@2022-01-26: Repairing of the padding border effect by
+    # applying a symmetric padding of the affected area
+    #
+    x[...,:prd,:] = torch.flip(x[...,prd:2*prd,:], dims=(-2,))         # top edge
+    x[...,-prd:,:] = torch.flip(x[...,-2*prd:-prd,:], dims=(-2,))      # bottom edge
+    x[...,:,:prd] = torch.flip(x[...,:,prd:2*prd], dims=(-1,))         # left edge
+    x[...,:,-prd:] = torch.flip(x[...,:,-2*prd:-prd], dims=(-1,))      # right edge
+    return x
+
 # Applies the Softmax (2D) to the given Tensor
 #
 # Assume the given tensor has any shape, where the final two dimensions represent some

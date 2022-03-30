@@ -26,9 +26,12 @@ class LaterallyConnectedLayer(nn.Module):
         alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, mu_batch_size=128, num_cell_dynamic_iterations=1):
         super().__init__()
         self.disabled = disabled
-        self.update = update
+        
+        # Use the pyTorch internal self.training, which gets adjusted
+        # by model.eval() / model.train(), to control whether updates should be done
+        self.training = update
         self.iterations_trained = 0
-        # TODO: How can I get the self.device filled here?
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.n = n
@@ -63,23 +66,23 @@ class LaterallyConnectedLayer(nn.Module):
         self.M = torch.clone(self.mu)
 
     def __repr__(self):
-        return f"{'' if self.disabled else '*'}{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)}, update={str(self.update)})"
+        return f"{'' if self.disabled else '*'}{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)}, update={str(self.training)})"
 
     def pad_activations(self, A):
         padded_A = torch.zeros(A.shape[:-2] + (self.prd*self.d+A.shape[-2], self.prd*self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
         padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = A
-        return self.symm_pad(padded_A, 2*self.prd)
+        return symmetric_padding(padded_A, 2*self.prd)
 
     # Keep the layer at this stage and no longer update relevant matrices,
     # only allow the layer to perform inference
     #
     def freeze(self):
-        self.update = False
+        self.training = False
 
     # Allow updates to happen on the layer
     #
     def unfreeze(self):
-        self.update = True
+        self.training = True
 
     def enable(self):
         self.disabled = False
@@ -89,7 +92,10 @@ class LaterallyConnectedLayer(nn.Module):
     #
     def disable(self):
         self.disabled = True
-
+    
+    # This method expects a batch of m images to be passed as A,
+    # giving it the shape (m, F, H, W)
+    #
     def forward(self, A):
         if self.disabled:
             return A
@@ -100,12 +106,20 @@ class LaterallyConnectedLayer(nn.Module):
             batch_size = A.shape[0]
 
             # Symmetric padding fix to remove border effect issues from 0-padding
-            A = self.symm_pad(A, self.prd)
+            A = symmetric_padding(A, self.prd)
 
             # Generate multiplex cells
+            # ---
+            # Introduce N identical feature cells to reduce cross talk
+            # Multiplied feature maps are treated as feature maps on the same level, i.e.
+            # for activations A of shape (32, 100, 50, 50) and n=4, we expect the new A to
+            # be of shape (32, 4*100, 50, 50) with (bs, a, i, j) == (bs, a + 100, i, j)
+            #
             self.A = A.repeat(1, self.n, 1, 1)
 
-            # Add noise
+            # Add noise to help break the symmetry between initially
+            # identical multiplex cells
+            #
             noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.device)
             self.A = torch.clip(self.A + self.eta * noise, min=0.0)
 
@@ -137,7 +151,7 @@ class LaterallyConnectedLayer(nn.Module):
                 uniqs, cnts = torch.cat((torch.arange(self.A.shape[1]).to(self.device), fm_indices[b,:])).unique(return_counts=True)
                 inverse_fm_idx[b,:] = uniqs[cnts==1]
 
-            if self.update:
+            if self.training:
                 # Lateral Connection Reinforcement
                 self.K_change = torch.zeros(size=self.K.shape, device=self.device)
 
@@ -176,7 +190,11 @@ class LaterallyConnectedLayer(nn.Module):
 
                 self.K_change = minmax_on_fm(self.K_change)
                 
-                # Update kernel
+                # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
+                # that we have no over- or underflows over time. 
+                #
+                # should hold: | alpha * K_change + (1 - alpha) * K | === 1
+                #
                 self.K = ((1 - self.alpha) * self.K) + self.alpha * self.K_change
 
             # Calculate output
@@ -186,6 +204,14 @@ class LaterallyConnectedLayer(nn.Module):
                 large_K[b, inverse_fm_idx[b,:], inverse_fm_idx[b,:], :, :] = 0
                 A[b, inverse_fm_idx[b,:], ...] = 0
 
+            # Applying the Kernel Convolution
+            #
+            # lehl@2022-01-26: When using padding=d, the resulting activation maps include
+            # artefacts at the image borders where activations are unusually high/low.
+            #
+            # lehl@2022-01-28: Add symmetrical padding to A bevor applying the convolution,
+            # then do the convolution with valid padding
+            #
             padded_A = self.pad_activations(A)
 
             L = torch.zeros((batch_size, self.n*self.num_fm, self.fm_height, self.fm_width), device=self.device)
@@ -199,135 +225,14 @@ class LaterallyConnectedLayer(nn.Module):
 
             # import code; code.interact(local=dict(globals(), **locals()))
 
+            # lehl@2022-03-30: TODO - Is this still needed?
+            # if self.training:
+            #     # Update the mean and down-/upscale the feature map strengths
+            #     self.M = (1 - self.beta) * self.M + self.beta * torch.mean(self.A[-1, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1), dim=(-2,-1))
+            #     self.S = torch.clip(self.S + self.gamma * (self.mu - self.M), min=0.0, max=1.0)
+
+            # Keep track of number of training iterations
+            self.iterations_trained += 1 if self.training else 0
+
             # TODO: check, that self.O has requires_grad=True/keeps it from A
             return self.O
-
-
-    # This method expects a batch of m images to be passed as A,
-    # giving it the shape (m, F, H, W)
-    #was 
-    def forward_old(self, A):
-        # If the layer is turned off, pass the data through without any changes
-        #
-        if self.disabled:
-            return A
-
-        batch_size = A.shape[0]
-        A = self.symm_pad(A, self.prd)
-
-        # Introduce N identical feature cells to reduce cross talk
-        # Multiplied feature maps are treated as feature maps on the same level, i.e.
-        # for activations A of shape (32, 100, 50, 50) and n=4, we expect the new A to
-        # be of shape (32, 4*100, 50, 50) with (bs, a, i, j) == (bs, a + 100, i, j)
-        #
-        self.A = torch.broadcast_to(A, (batch_size,) + (self.n,) + A.shape[1:]).reshape((batch_size,) + (self.n * A.shape[1],) + A.shape[2:])
-
-        if self.update:
-            # lehl@2022-02-04: Add noise to help break the symmetry
-            #
-            noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.gpu_device)
-            self.A = torch.clip(self.A + self.eta * noise, min=0.0)
-
-            # Lateral Connection Reinforcement
-            #
-            self.K_change = torch.zeros(size=self.K.shape, device=self.gpu_device)
-
-            for a in range(self.K.shape[1]):
-                for x in range(self.K.shape[2]):
-                    for y in range(self.K.shape[3]):
-                        # All the feature maps that influence the activation
-                        #
-                        xoff_f = - self.d + x
-                        yoff_f = - self.d + y
-                        source_feature_maps = self.A[:, :, max(0, xoff_f):self.A.shape[-2]+min(xoff_f, 0), max(0, yoff_f):self.A.shape[-1]+min(0, yoff_f)]
-                        
-                        # The activation to be influenced
-                        #
-                        xoff_i = self.d - x
-                        yoff_i = self.d - y
-                        target_feature_map = self.A[:, a, max(0, xoff_i):self.A.shape[-2]+min(xoff_i, 0), max(0, yoff_i):self.A.shape[-1]+min(0, yoff_i)]
-
-                        # Divide by the number of feature maps used, to scale down the kernel
-                        #
-                        self.K_change[:, a, x, y] = torch.sum(source_feature_maps * target_feature_map, dim=(1,2)) / (self.K.shape[0] * batch_size)
-            
-            # Additional normalization because of the potential number of height and width pixels summed
-            #
-            self.K_change /= (self.K.shape[-2] * self.K.shape[-1])
-
-            # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
-            # that we have no over- or underflows over time. 
-            #
-            # should hold: | alpha * K_change + (1 - alpha) * K | === 1
-            #
-            self.K_change = softmax_on_fm(self.K_change)
-            self.K = ((1 - self.alpha) * self.K) + self.alpha * self.K_change
-
-        # Replicate for timekeeping / debugging
-        self.A = torch.broadcast_to(self.A, (self.t_dyn,) + self.A.shape)
-        self.O = torch.zeros(size=self.A.shape, device=self.gpu_device)
-
-        for t in range(self.t_dyn):
-            # Applying the Kernel Convolution
-            #
-            # lehl@2022-01-26: When using padding=d, the resulting activation maps include
-            # artefacts at the image borders where activations are unusually high/low.
-            #
-            # lehl@2022-01-28: Add symmetrical padding to A bevor applying the convolution,
-            # then do the convolution with valid padding
-            #
-            self.padded_A = torch.zeros(self.A.shape[1:-2] + (self.prd*self.d + self.A.shape[-2], self.prd*self.d + self.A.shape[-1]), dtype=self.A.dtype, device=self.gpu_device)
-            # copy over A into padded A
-            self.padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = self.A[t, ...]
-            # fix borders for padded A (use 2x prd, otherwise we have two identical mirrorings)
-            self.padded_A = self.symm_pad(self.padded_A, 2*self.prd)
-
-            # lehl@2022-02-10: Add softmax to the kernel on each feature map before the convolution step,
-            # such that the unbounded ratios are bounded
-            #
-            self.L = F.conv2d(self.padded_A, minmax_on_fm(self.K.transpose_(0, 1)), padding=0) / num_fm
-
-            # Apply Softmax to L, then MinMax Scaling, so that the final values
-            # are in the range of [0, 1], reaching from 0 to 1
-            #
-            self.L = softmax_minmax_scaled(self.L)
-
-            # Activation Scaling
-            #
-            # TODO: Do I need to alter self.S further? (unsqueeze 0?)
-            self.O[t, ...] = self.A[t, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1)
-            
-            if t < self.t_dyn - 1:
-                self.A[t+1, ...] = (1 - self.theta) * self.A[t, ...] + self.theta * self.A[t, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1)
-
-        if self.update:
-            # Update the mean and down-/upscale the feature map strengths
-            self.M = (1 - self.beta) * self.M + self.beta * torch.mean(self.A[-1, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1), dim=(-2,-1))
-            self.S = torch.clip(self.S + self.gamma * (self.mu - self.M), min=0.0, max=1.0)
-
-        # Keep track of number of training iterations
-        #
-        self.iterations_trained += 1 if self.update else 0
-
-        return self.O[-1, ...]
-
-    # Symmetric padding to fix potential border effect artifacts
-    # around the borders of feature map activations.
-    #
-    # - x:          Feature map data
-    # - prd:        Padding repair distance,
-    #                   how many pixels are repaired around the edges
-    #
-    def symm_pad(self, x, prd):
-        # Check pytorch discussion on symmetric padding implementation:
-        # https://discuss.pytorch.org/t/symmetric-padding/19866
-        #
-        # lehl@2022-01-26: Repairing of the padding border effect by
-        # applying a symmetric padding of the affected area
-        #
-        x[...,:prd,:] = torch.flip(x[...,prd:2*prd,:], dims=(-2,))         # top edge
-        x[...,-prd:,:] = torch.flip(x[...,-2*prd:-prd,:], dims=(-2,))      # bottom edge
-        x[...,:,:prd] = torch.flip(x[...,:,prd:2*prd], dims=(-1,))         # left edge
-        x[...,:,-prd:] = torch.flip(x[...,:,-2*prd:-prd], dims=(-1,))      # right edge
-        return x
-

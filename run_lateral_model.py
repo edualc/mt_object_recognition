@@ -21,7 +21,9 @@ def main():
     test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=20, shuffle=False, num_workers=1)
     corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=20, shuffle=False, num_workers=1)
     
+    model.train_with_loader(train_loader, num_epochs=1)
     import code; code.interact(local=dict(globals(), **locals()))
+
 
 def image_transform():
     return transforms.Compose([
