@@ -1,4 +1,5 @@
 from typing import Union, List, Dict, Any, cast
+from collections import OrderedDict
 from PIL import Image
 from tqdm import tqdm
 import datetime
@@ -12,6 +13,8 @@ import torchvision.transforms as transforms
 from torchvision.models.vgg import VGG
 
 import wandb
+
+from .layers import LaterallyConnectedLayer
 
 
 # Taken from https://pytorch.org/vision/main/_modules/torchvision/models/vgg.html#vgg19
@@ -56,6 +59,53 @@ def build_custom_vgg19(dropout, num_classes):
         # nn.Softmax(-1)
     )
     return net
+
+class VggWithLCL(nn.Module):
+    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4):
+        super(VggWithLCL, self).__init__()
+        self.num_classes = num_classes
+        self.learning_rate = learning_rate
+        self.dropout = dropout
+        self.num_multiplex = num_multiplex
+
+        self.net = build_custom_vgg19(dropout=self.dropout, num_classes=self.num_classes)
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self._add_lcl_to_network()
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
+
+    def _add_lcl_to_network(self):
+        self.features = nn.Sequential(
+            OrderedDict([
+                ('pool1', self.net.features[:5]),
+                ('lcl1',  LaterallyConnectedLayer(self.num_multiplex, 64, 112, 112, d=2)),
+                ('pool2', self.net.features[5:10]),
+                ('lcl2',  LaterallyConnectedLayer(self.num_multiplex, 128, 56, 56, d=2)),
+                ('pool3', self.net.features[10:19]),
+                ('lcl3',  LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=2)),
+                ('pool4', self.net.features[19:28]),
+                ('lcl4',  LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=2)),
+                ('pool5', self.net.features[28:]),
+            ])
+        )
+        self.avgpool = self.net.avgpool
+        self.classifier = self.net.classifier
+        del self.net
+    
+    def forward(self, x):
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
+
+    def train(self, dataset_loader):
+        pass
+
+    def test(self, dataset_loader):
+        pass
+
 
 # GPU Performance Blogpost:
 # https://towardsdatascience.com/7-tips-for-squeezing-maximum-performance-from-pytorch-ca4a40951259
@@ -194,7 +244,6 @@ class CharacterVgg():
             print('')
 
             return acc, total_loss
-
 
 class MNISTVgg(CharacterVgg):
     def __init__(self, dataset_path, num_classes=10, batch_size=32, learning_rate=0.003, dropout=0.2):

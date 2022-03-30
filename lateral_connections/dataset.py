@@ -3,7 +3,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision.io.image import read_image
-
+from PIL import Image
 
 # lehl@2021-12-31: Based on the documentation for custom PyTorch datasets at
 # https://pytorch.org/tutorials/beginner/basics/data_tutorial.html#creating-a-custom-dataset-for-your-files
@@ -34,6 +34,24 @@ class CustomImageDataset(Dataset):
     def get_batch(self, n):
         return next(iter(DataLoader(self, batch_size=n, shuffle=True)))
 
+class MNISTCDataset(Dataset):
+    def __init__(self, data, targets, transform=None):
+        self.data = data
+        self.targets = torch.LongTensor(targets)
+        self.transform = transform
+        
+    def __getitem__(self, index):
+        x = self.data[index]
+        y = self.targets[index]
+        
+        if self.transform:
+            x = Image.fromarray(x, mode='L')
+            x = self.transform(x)
+            
+        return x,y
+
+    def __len__(self):
+        return len(self.data)
 
 def main():
     IMG_DIR = 'images/geometric_dataset'
