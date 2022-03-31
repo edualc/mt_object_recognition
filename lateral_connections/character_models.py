@@ -61,12 +61,13 @@ def build_custom_vgg19(dropout, num_classes):
     return net
 
 class VggWithLCL(nn.Module):
-    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4):
+    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4, do_wandb=False):
         super(VggWithLCL, self).__init__()
         self.num_classes = num_classes
         self.learning_rate = learning_rate
         self.dropout = dropout
         self.num_multiplex = num_multiplex
+        self.do_wandb = do_wandb
 
         self.net = build_custom_vgg19(dropout=self.dropout, num_classes=self.num_classes)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -93,6 +94,13 @@ class VggWithLCL(nn.Module):
         self.classifier = self.net.classifier
         self.to(self.device)
         del self.net
+
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path):
+        self.load_state_dict(torch.load(path))
+        self.eval()
     
     def forward(self, x):
         x = self.features(x)
@@ -101,7 +109,7 @@ class VggWithLCL(nn.Module):
         x = self.classifier(x)
         return x
 
-    def train_with_loader(self, dataset_loader, num_epochs=5):
+    def train_with_loader(self, train_loader, test_loader, num_epochs=5):
         total_params = sum(p.numel() for p in self.parameters())
         print(f"[INFO]: {total_params:,} total parameters.")
         total_trainable_params = sum(
@@ -110,7 +118,6 @@ class VggWithLCL(nn.Module):
 
         for epoch in range(num_epochs):
             print(f"[INFO]: Epoch {epoch} of {num_epochs}")
-
             self.train()
 
             correct = 0
@@ -119,7 +126,7 @@ class VggWithLCL(nn.Module):
             counter = 0
 
             # Training Loop
-            for i, (images, labels) in tqdm(enumerate(dataset_loader, 0), total=len(dataset_loader), desc='Training'):
+            for i, (images, labels) in tqdm(enumerate(train_loader, 0), total=len(train_loader), desc='Training'):
                 counter += 1
                 images = images.to(self.device)
                 labels = labels.to(self.device)
@@ -138,14 +145,21 @@ class VggWithLCL(nn.Module):
                 total += labels.size(0)
                 total_loss += (loss.item() / labels.size(0))
 
-                if (i % 10) == 0:
-                    print('[Iteration ' + str(i) + ']\tloss: ', total_loss/counter, ' accuracy: ', correct/total)
+                current_iteration = epoch*len(train_loader) + i
+                if (i % 25) == 0:
+                    if self.do_wandb:
+                        wandb.log({ 'train_loss': round(total_loss/counter,4), 'train_acc': round(correct/total,4), 'iteration': current_iteration })
+                    else:
+                        print('[Iteration ' + str(i) + ']\tloss: ', round(total_loss/counter,4), ' accuracy: ', round(correct/total,4))
+
+                if (current_iteration % 1000) == 0:
+                    self.save(f"models/vgg_with_lcl/it{current_iteration}_e{epoch}.pt")
 
             total_loss /= counter
             acc = correct / total
 
             # Validation Loop
-            val_acc, val_loss = self.test()
+            val_acc, val_loss = self.test(test_loader)
 
             log_msg = ''.join([
                 "Epoch",       f"{epoch+1:2d}",                 "\t",
@@ -154,15 +168,40 @@ class VggWithLCL(nn.Module):
                 "val_loss:",   f"{round(val_loss, 4):1.4f}",    "\t",
                 "val_acc:",    f"{round(val_acc, 4):1.4f}"
             ])
-            print(log_msg)
-            # wandb.log({ 'loss': total_loss, 'acc': acc, 'val_loss': val_loss, 'val_acc': val_acc })
-            # self.save_model(epoch)
+            if self.do_wandb:
+                wandb.log({ 'train_loss': total_loss, 'train_acc': acc, 'val_loss': val_loss, 'val_acc': val_acc, 'epoch': epoch, 'iteration': current_iteration })
+            else:
+                print(log_msg)
+    
+            self.save(f"models/vgg_with_lcl/e{epoch}.pt")
 
-    def test(self, dataset_loader):
-        return 0, 0
+    def test(self, test_loader):
+        self.eval()
 
-    def save_model(self, epoch):
-        pass
+        correct = 0
+        total = 0
+        total_loss = 0
+        counter = 0
+
+        # Evaluation Loop
+        for i, (images, labels) in tqdm(enumerate(test_loader, 0), total=len(test_loader), desc='Testing'):
+            counter += 1
+            images = images.to(self.device)
+            labels = labels.to(self.device)
+
+            outputs = self(images)
+            loss = self.loss_fn(outputs, labels)
+            
+            _, preds = torch.max(outputs, 1)
+    
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+            total_loss += (loss.item() / labels.size(0))
+
+        total_loss /= counter
+        acc = correct / total
+
+        return acc, total_loss
 
 
 # GPU Performance Blogpost:

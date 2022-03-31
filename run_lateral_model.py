@@ -11,17 +11,45 @@ from lateral_connections import LateralModel, VggModel
 from lateral_connections import VggWithLCL
 from lateral_connections import MNISTCDataset
 
+import wandb
+import datetime
+
+DO_WANDB = True
+
 def main():
     num_classes = 10
 
-    model = VggWithLCL(num_classes, learning_rate=0.003, dropout=0.2, num_multiplex=4)
+    # import code; code.interact(local=dict(globals(), **locals()))
+
+    config = {
+        'learning_rate': 0.003,
+        'dropout': 0.2,
+        'num_multiplex': 4,
+        'batch_size': 10
+    }
+
+    wandb_run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
+
+    if DO_WANDB:
+        wandb.init(
+            project='MT_LateralConnections',
+            entity='lehl',
+            group='VggWithLCL',
+            name=wandb_run_name,
+            config=config
+        )
+
+    model = VggWithLCL(num_classes, learning_rate=config['learning_rate'], dropout=config['dropout'], num_multiplex=config['num_multiplex'], do_wandb=DO_WANDB)
     model.features.lcl3.enable()
 
-    train_loader = torch.utils.data.DataLoader(load_mnist(train=True), batch_size=10, shuffle=True, num_workers=1)
-    test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=10, shuffle=False, num_workers=1)
-    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=10, shuffle=False, num_workers=1)
+    train_loader = torch.utils.data.DataLoader(load_mnist(train=True), batch_size=config['batch_size'], shuffle=True, num_workers=1)
+    test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=config['batch_size'], shuffle=False, num_workers=1)
+    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=config['batch_size'], shuffle=False, num_workers=1)
     
-    model.train_with_loader(train_loader, num_epochs=1)
+    model.train_with_loader(train_loader, test_loader, num_epochs=1)
+
+    c_acc, c_loss = model.test(corrupt_loader)
+    print(f"MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")
     import code; code.interact(local=dict(globals(), **locals()))
 
 
@@ -42,14 +70,10 @@ def load_mnistc(dirname=None, train=False):
     images  = images.transpose(0, 3, 1, 2)[:, 0, ...]
 
     labels = np.load(root + '/' + dataset_type + '_labels.npy').reshape((images.shape[0],))
-    dataset = MNISTCDataset(images, labels, transform=image_transform())
-
-    return dataset
+    return MNISTCDataset(images, labels, transform=image_transform())
 
 def load_mnist(train=False):
-    dataset = MNIST('images/mnist/', train=train, transform=image_transform(), download=True)
-
-    return dataset
+    return MNIST('images/mnist/', train=train, transform=image_transform(), download=True)
 
 if __name__ == '__main__':
     main()
