@@ -60,11 +60,12 @@ def train_network(config):
         wandb_run_name = 'VGG19_' + base_name
 
     if DO_WANDB:
+        wandb.login(key='efd0a05b7bd26ed445bf073625a373b845fc9385')
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='debug',
-            # group='Vgg19WithLCL' if config['use_lcl'] else 'Vgg19',
+            group='Vgg19WithLCL_HyperParam' if config['use_lcl'] else 'Vgg19',
+            # group='debug',
             name=wandb_run_name,
             config=config
         )
