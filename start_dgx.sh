@@ -1,0 +1,1 @@
+srun --job-name=lehldock --pty --ntasks=1 --cpus-per-task=4 --mem=32G --gres=gpu:1 nvidia-docker run --shm-size=16g -v /cluster/home/lehl/development/mt_object_recognition:/workspace lehl/mt_lcl python run_lateral_model.py --lcl;
