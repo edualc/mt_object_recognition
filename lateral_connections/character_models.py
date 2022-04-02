@@ -61,13 +61,14 @@ def build_custom_vgg19(dropout, num_classes):
     return net
 
 class VggWithLCL(nn.Module):
-    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4, do_wandb=False):
+    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4, do_wandb=False, run_identifier=""):
         super(VggWithLCL, self).__init__()
         self.num_classes = num_classes
         self.learning_rate = learning_rate
         self.dropout = dropout
         self.num_multiplex = num_multiplex
         self.do_wandb = do_wandb
+        self.run_identifier = run_identifier
 
         self.net = build_custom_vgg19(dropout=self.dropout, num_classes=self.num_classes)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -109,7 +110,7 @@ class VggWithLCL(nn.Module):
         x = self.classifier(x)
         return x
 
-    def train_with_loader(self, train_loader, test_loader, num_epochs=5):
+    def train_with_loader(self, train_loader, val_loader, num_epochs=5):
         total_params = sum(p.numel() for p in self.parameters())
         print(f"[INFO]: {total_params:,} total parameters.")
         total_trainable_params = sum(
@@ -125,9 +126,14 @@ class VggWithLCL(nn.Module):
             total_loss = 0
             counter = 0
 
+            agg_correct = 0
+            agg_total = 0
+            agg_loss = 0
+
             # Training Loop
             for i, (images, labels) in tqdm(enumerate(train_loader, 0), total=len(train_loader), desc='Training'):
                 counter += 1
+                
                 images = images.to(self.device)
                 labels = labels.to(self.device)
 
@@ -141,39 +147,54 @@ class VggWithLCL(nn.Module):
 
                 _, preds = torch.max(outputs, 1)
         
-                correct += (preds == labels).sum().item()
-                total += labels.size(0)
-                total_loss += (loss.item() / labels.size(0))
+                correct = (preds == labels).sum().item()
+                total = labels.size(0)
+                total_loss = (loss.item() / labels.size(0))
 
                 current_iteration = epoch*len(train_loader) + i
-                if (i % 25) == 0:
+
+                if (((current_iteration+1) % 2000) == 0):
+                    if current_iteration > 0 or epoch > 0:
+                        self.save(f"models/vgg_with_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
+            
+                    val_acc, val_loss = self.test(val_loader)
+                    wandb.log({'val_loss': val_loss, 'val_acc': val_acc}, commit=False)
+
+                if ((i+1) % 100) == 0:
                     if self.do_wandb:
-                        wandb.log({ 'train_loss': round(total_loss/counter,4), 'train_acc': round(correct/total,4), 'iteration': current_iteration })
+                        wandb.log({ 'train_batch_loss': round(total_loss,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
                     else:
-                        print('[Iteration ' + str(i) + ']\tloss: ', round(total_loss/counter,4), ' accuracy: ', round(correct/total,4))
+                        print('[Iteration ' + str(i) + ']\tloss: ', round(total_loss,4), ' accuracy: ', round(correct/total,4))
+                    
+                    agg_correct += correct
+                    agg_total += total
+                    agg_loss += total_loss
 
-                if (current_iteration % 1000) == 0:
-                    self.save(f"models/vgg_with_lcl/it{current_iteration}_e{epoch}.pt")
+                    correct = 0
+                    total = 0
+                    total_loss = 0
+                    counter = 0
 
-            total_loss /= counter
-            acc = correct / total
+            wandb.log({'epoch': epoch, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total})
 
-            # Validation Loop
-            val_acc, val_loss = self.test(test_loader)
+            # TODO: REMOVE?
+            # total_loss /= counter
+            # acc = correct / total
 
-            log_msg = ''.join([
-                "Epoch",       f"{epoch+1:2d}",                 "\t",
-                "loss:",       f"{round(total_loss, 4):1.4f}",  "\t",
-                "acc:",        f"{round(acc, 4):1.4f}",         "\t",
-                "val_loss:",   f"{round(val_loss, 4):1.4f}",    "\t",
-                "val_acc:",    f"{round(val_acc, 4):1.4f}"
-            ])
-            if self.do_wandb:
-                wandb.log({ 'train_loss': total_loss, 'train_acc': acc, 'val_loss': val_loss, 'val_acc': val_acc, 'epoch': epoch, 'iteration': current_iteration })
-            else:
-                print(log_msg)
-    
-            self.save(f"models/vgg_with_lcl/e{epoch}.pt")
+            # # Validation Loop
+            # val_acc, val_loss = self.test(val_loader)
+
+            # log_msg = ''.join([
+            #     "Epoch",       f"{epoch+1:2d}",                 "\t",
+            #     "loss:",       f"{round(total_loss, 4):1.4f}",  "\t",
+            #     "acc:",        f"{round(acc, 4):1.4f}",         "\t",
+            #     "val_loss:",   f"{round(val_loss, 4):1.4f}",    "\t",
+            #     "val_acc:",    f"{round(val_acc, 4):1.4f}"
+            # ])
+            # if self.do_wandb:
+            #     wandb.log({ 'train_loss': total_loss, 'train_acc': acc, 'val_loss': val_loss, 'val_acc': val_acc, 'epoch': epoch, 'iteration': current_iteration })
+            # else:
+            #     print(log_msg)
 
     def test(self, test_loader):
         self.eval()

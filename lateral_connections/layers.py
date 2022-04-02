@@ -141,7 +141,6 @@ class LaterallyConnectedLayer(nn.Module):
             A_max = torch.argmax(torch.transpose(A_max,2,1), dim=-1)
 
             # Get the argmax indices inside the multiplex cells for each sample in the batch
-            # TODO: How to index the kernel / activations with them?
             fm_indices = A_max.shape[1] * A_max + torch.arange(0, A_max.shape[1]).to(self.device)
             filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(self.A, fm_indices)])
             del A_max

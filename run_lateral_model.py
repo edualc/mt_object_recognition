@@ -1,3 +1,5 @@
+import argparse
+
 import torch
 from torchvision.datasets import MNIST
 import torchvision.transforms as transforms
@@ -10,70 +12,81 @@ from tqdm import tqdm
 from lateral_connections import LateralModel, VggModel
 from lateral_connections import VggWithLCL
 from lateral_connections import MNISTCDataset
+from lateral_connections.loaders import get_loaders
 
 import wandb
 import datetime
 
-DO_WANDB = True
+DO_WANDB = False
 
-def main():
-    num_classes = 10
-
-    # import code; code.interact(local=dict(globals(), **locals()))
-
+def main(args):
     config = {
-        'learning_rate': 0.003,
-        'dropout': 0.2,
-        'num_multiplex': 4,
-        'batch_size': 10
+        'num_classes': 10,
+        'learning_rate': args.lr,
+        'dropout': args.dropout,
+        'num_multiplex': args.num_multiplex,
+        'batch_size': args.batch_size,
+        'use_lcl': args.lcl,
+        'num_epochs': args.num_epochs
     }
 
-    wandb_run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
+    train_network(config)
+    # eval_network(use_lcl=True, model_path='models/vgg_with_lcl/2022-04-01_085941__it1000_e0.pt') # 6k iterations w/ LCL
+    # eval_network(use_lcl=False, model_path='models/vgg_with_lcl/2022-04-01_103028__e0.pt') # 6k iterations w/o LCL
+
+def eval_network(config, model_path):
+    model = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'], num_multiplex=config['num_multiplex'], do_wandb=False)
+    model.load(model_path)
+
+    if config['use_lcl']:
+        model.features.lcl3.enable()
+
+    _, _, test_loader, corrupt_loader = get_loaders(config['batch_size'])
+    n_acc, n_loss = model.test(test_loader)
+    print(f"[{'VGG19+LCL' if config['use_lcl'] else 'VGG19'}] MNIST:\t\tAccuracy:{n_acc:1.4f}\tLoss:{n_loss:1.4f}")
+
+    c_acc, c_loss = model.test(corrupt_loader)
+    print(f"[{'VGG19+LCL' if config['use_lcl'] else 'VGG19'}] MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")
+
+def train_network(config):
+    wandb_run_name = 'VGG19_' + 'LCL_' if config['use_lcl'] else '' + datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
 
     if DO_WANDB:
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='VggWithLCL',
+            group='Vgg19WithLCL' if config['use_lcl'] else 'Vgg19',
             name=wandb_run_name,
             config=config
         )
 
-    model = VggWithLCL(num_classes, learning_rate=config['learning_rate'], dropout=config['dropout'], num_multiplex=config['num_multiplex'], do_wandb=DO_WANDB)
-    model.features.lcl3.enable()
-
-    train_loader = torch.utils.data.DataLoader(load_mnist(train=True), batch_size=config['batch_size'], shuffle=True, num_workers=1)
-    test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=config['batch_size'], shuffle=False, num_workers=1)
-    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=config['batch_size'], shuffle=False, num_workers=1)
+    model = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'], num_multiplex=config['num_multiplex'], do_wandb=DO_WANDB, run_identifier=wandb_run_name)
     
-    model.train_with_loader(train_loader, test_loader, num_epochs=1)
+    if config['use_lcl']:
+        model.features.lcl3.enable()
+
+    train_loader, val_loader, test_loader, corrupt_loader = get_loaders(config['batch_size'])
+    
+    model.train_with_loader(train_loader, val_loader, num_epochs=config['num_epochs'])
 
     c_acc, c_loss = model.test(corrupt_loader)
-    print(f"MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")
-    import code; code.interact(local=dict(globals(), **locals()))
+    print(f"[{'VGG19+LCL' if config['use_lcl'] else 'VGG19'}] MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")
 
+    # import code; code.interact(local=dict(globals(), **locals()))
+    wandb.finish(quiet=True)
 
-def image_transform():
-    return transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5), std=(0.5))
-    ])
-
-def load_mnistc(dirname=None, train=False):
-    if dirname is None:
-        dirname = 'line'
-    root = 'images/mnist_c/' + dirname
-    dataset_type = 'train' if train else 'test'
-
-    images = np.load(root + '/' + dataset_type + '_images.npy')
-    images  = images.transpose(0, 3, 1, 2)[:, 0, ...]
-
-    labels = np.load(root + '/' + dataset_type + '_labels.npy').reshape((images.shape[0],))
-    return MNISTCDataset(images, labels, transform=image_transform())
-
-def load_mnist(train=False):
-    return MNIST('images/mnist/', train=train, transform=image_transform(), download=True)
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dropout', type=float, default=0.2, help='Dropout percentage of VGG19')
+    parser.add_argument('--lr', type=float, default=0.003, help='Learning rate of VGG19\'s optimizer')
+    parser.add_argument('--num_multiplex', type=int, default=4, help='Number of multiplex cells in LCL layers')
+    parser.add_argument('--batch_size', type=int, default=10, help='Batch size')
+    parser.add_argument('--lcl', default=False, action='store_true', help='Whether VGG19 should be trained with or without LCL')
+    parser.add_argument('--num_epochs', type=int, default=4, help='Number of epochs trained')
+
+    args = parser.parse_args()
+    main(args)
+    # import code; code.interact(local=dict(globals(), **locals()))
+
+
