@@ -61,7 +61,9 @@ def build_custom_vgg19(dropout, num_classes):
     return net
 
 class VggWithLCL(nn.Module):
-    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4, do_wandb=False, run_identifier=""):
+    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4, do_wandb=False, run_identifier="",
+        lcl_alpha=0.1, lcl_eta=0.1, lcl_theta=0.1, lcl_iota=0.1):
+
         super(VggWithLCL, self).__init__()
         self.num_classes = num_classes
         self.learning_rate = learning_rate
@@ -69,6 +71,11 @@ class VggWithLCL(nn.Module):
         self.num_multiplex = num_multiplex
         self.do_wandb = do_wandb
         self.run_identifier = run_identifier
+
+        self.lcl_alpha = lcl_alpha
+        self.lcl_theta = lcl_theta
+        self.lcl_eta = lcl_eta
+        self.lcl_iota = lcl_iota
 
         self.net = build_custom_vgg19(dropout=self.dropout, num_classes=self.num_classes)
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -81,13 +88,17 @@ class VggWithLCL(nn.Module):
         self.features = nn.Sequential(
             OrderedDict([
                 ('pool1', self.net.features[:5]),
-                ('lcl1',  LaterallyConnectedLayer(self.num_multiplex, 64, 112, 112, d=2)),
+                ('lcl1',  LaterallyConnectedLayer(self.num_multiplex, 64, 112, 112, d=2, 
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
                 ('pool2', self.net.features[5:10]),
-                ('lcl2',  LaterallyConnectedLayer(self.num_multiplex, 128, 56, 56, d=2)),
+                ('lcl2',  LaterallyConnectedLayer(self.num_multiplex, 128, 56, 56, d=2, 
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
                 ('pool3', self.net.features[10:19]),
-                ('lcl3',  LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=2)),
+                ('lcl3',  LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=2, 
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
                 ('pool4', self.net.features[19:28]),
-                ('lcl4',  LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=2)),
+                ('lcl4',  LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=2, 
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
                 ('pool5', self.net.features[28:]),
             ])
         )
@@ -137,34 +148,28 @@ class VggWithLCL(nn.Module):
                 images = images.to(self.device)
                 labels = labels.to(self.device)
 
-                self.optimizer.zero_grad()
-
                 outputs = self(images)
                 loss = self.loss_fn(outputs, labels)
                 
+                self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
                 _, preds = torch.max(outputs, 1)
         
-                correct = (preds == labels).sum().item()
-                total = labels.size(0)
-                total_loss = (loss.item() / labels.size(0))
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+                total_loss += (loss.item() / labels.size(0))
 
                 current_iteration = epoch*len(train_loader) + i
 
-                if (((current_iteration+1) % 2000) == 0):
-                    if current_iteration > 0 or epoch > 0:
-                        self.save(f"models/vgg_with_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
-            
+                if current_iteration > 0 and (current_iteration % 1250) == 0:
+                    self.save(f"models/vgg_with_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
                     val_acc, val_loss = self.test(val_loader)
-                    wandb.log({'val_loss': val_loss, 'val_acc': val_acc}, commit=False)
+                    wandb.log({ 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }, commit=False)
 
-                if ((i+1) % 100) == 0:
-                    if self.do_wandb:
-                        wandb.log({ 'train_batch_loss': round(total_loss,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
-                    else:
-                        print('[Iteration ' + str(i) + ']\tloss: ', round(total_loss,4), ' accuracy: ', round(correct/total,4))
+                if (current_iteration % 250) == 0:
+                    wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
                     
                     agg_correct += correct
                     agg_total += total
@@ -175,26 +180,7 @@ class VggWithLCL(nn.Module):
                     total_loss = 0
                     counter = 0
 
-            wandb.log({'epoch': epoch, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total})
-
-            # TODO: REMOVE?
-            # total_loss /= counter
-            # acc = correct / total
-
-            # # Validation Loop
-            # val_acc, val_loss = self.test(val_loader)
-
-            # log_msg = ''.join([
-            #     "Epoch",       f"{epoch+1:2d}",                 "\t",
-            #     "loss:",       f"{round(total_loss, 4):1.4f}",  "\t",
-            #     "acc:",        f"{round(acc, 4):1.4f}",         "\t",
-            #     "val_loss:",   f"{round(val_loss, 4):1.4f}",    "\t",
-            #     "val_acc:",    f"{round(val_acc, 4):1.4f}"
-            # ])
-            # if self.do_wandb:
-            #     wandb.log({ 'train_loss': total_loss, 'train_acc': acc, 'val_loss': val_loss, 'val_acc': val_acc, 'epoch': epoch, 'iteration': current_iteration })
-            # else:
-            #     print(log_msg)
+            wandb.log({'epoch': epoch, 'iteration': current_iteration, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total})
 
     def test(self, test_loader):
         self.eval()
@@ -396,7 +382,7 @@ if __name__ == '__main__':
 
     for img, lbl in m.test_dataset:
         test_labels.append(lbl)
-    import code; code.interact(local=dict(globals(), **locals()))
+    # import code; code.interact(local=dict(globals(), **locals()))
 
 
 

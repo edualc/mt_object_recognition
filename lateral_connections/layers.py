@@ -23,7 +23,7 @@ from .torch_utils import *
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, mu_batch_size=128):
+        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128):
         super().__init__()
         self.disabled = disabled
         
@@ -34,20 +34,28 @@ class LaterallyConnectedLayer(nn.Module):
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        self.n = n
-        self.d = d
-        self.k = 2*self.d + 1
-        self.prd = prd
-        self.num_fm = num_fm
-        self.fm_height = fm_height
-        self.fm_width = fm_width
+        self.register_parameter('n', nn.Parameter(torch.Tensor([n]).to(torch.int), requires_grad=False))
+        self.register_parameter('d', nn.Parameter(torch.Tensor([d]).to(torch.int), requires_grad=False))
+        self.register_parameter('k', nn.Parameter(torch.Tensor([2*self.d+1]).to(torch.int), requires_grad=False))
+        self.register_parameter('prd', nn.Parameter(torch.Tensor([prd]).to(torch.int), requires_grad=False))
+        self.register_parameter('num_fm', nn.Parameter(torch.Tensor([num_fm]).to(torch.int), requires_grad=False))
+        self.register_parameter('fm_height', nn.Parameter(torch.Tensor([fm_height]).to(torch.int), requires_grad=False))
+        self.register_parameter('fm_width', nn.Parameter(torch.Tensor([fm_width]).to(torch.int), requires_grad=False))
 
-        self.alpha = alpha                          # Rate at which the kernel K is changed by K_change
-        self.beta = beta                            # Adjustment rate of mean output per FM
-        self.gamma = gamma                          # Adjustment rate of FM strength
-        self.eta = eta                              # Parameter to control the amount of noise added to the feature maps
-        self.theta = theta                          # Rate at which each cell dynamic iteration changes A
-        self.mu_batch_size = mu_batch_size          # Number of images from dataset to calculate initial :mu
+        # Rate at which the kernel K is changed by K_change
+        self.register_parameter('alpha', nn.Parameter(torch.Tensor([alpha]), requires_grad=False))
+        # Adjustment rate of mean output per FM
+        self.register_parameter('beta', nn.Parameter(torch.Tensor([beta]), requires_grad=False))
+        # Adjustment rate of FM strength
+        self.register_parameter('gamma', nn.Parameter(torch.Tensor([gamma]), requires_grad=False))
+        # Parameter to control the amount of noise added to the feature maps
+        self.register_parameter('eta', nn.Parameter(torch.Tensor([eta]), requires_grad=False))
+        # Rate at which each cell dynamic iteration changes A
+        self.register_parameter('theta', nn.Parameter(torch.Tensor([theta]), requires_grad=False))
+        # How the (1-iota)*A + iota*L argmax is calculated
+        self.register_parameter('iota', nn.Parameter(torch.Tensor([iota]), requires_grad=False))
+        # Number of images from dataset to calculate initial :mu
+        self.register_parameter('mu_batch_size', nn.Parameter(torch.Tensor([mu_batch_size]), requires_grad=False))
 
         # lehl@2022-02-10: Applying softmax helps to keep these values somewhat bounded and to
         # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
@@ -77,12 +85,12 @@ class LaterallyConnectedLayer(nn.Module):
     # only allow the layer to perform inference
     #
     def freeze(self):
-        self.training = False
+        self.training = False # pytorch flag
 
     # Allow updates to happen on the layer
     #
     def unfreeze(self):
-        self.training = True
+        self.training = True # pytorch flag
 
     def enable(self):
         self.disabled = False
@@ -120,11 +128,12 @@ class LaterallyConnectedLayer(nn.Module):
             #
             self.A = symm_A.repeat(1, self.n, 1, 1)
 
-            # Add noise to help break the symmetry between initially
-            # identical multiplex cells
-            #
-            noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.device)
-            self.A = torch.clip(self.A + self.eta * noise, min=0.0)
+            if self.training:
+                # Add noise to help break the symmetry between initially
+                # identical multiplex cells
+                #
+                noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.device)
+                self.A = torch.clip(self.A + self.eta * noise, min=0.0)
 
             # generate padded A for convolution
             padded_A = self.pad_activations(self.A)
@@ -136,7 +145,7 @@ class LaterallyConnectedLayer(nn.Module):
 
             # Calculate A_hat, perform convolution (L) and add to intial input
             # find the maximum multiplex cells for each multiple (n)
-            A_max = torch.sum(self.A + self.L, dim=(-2,-1))
+            A_max = torch.sum((1 - self.iota) * self.A + self.iota * self.L, dim=(-2,-1))
             A_max = A_max.reshape((A_max.shape[0], self.n, A_max.shape[1]//self.n))
             A_max = torch.argmax(torch.transpose(A_max,2,1), dim=-1)
 
@@ -189,8 +198,9 @@ class LaterallyConnectedLayer(nn.Module):
 
                         # Average across the batch size
                         #
-                        K_change[:, :, x, y] = torch.sum(tmp, dim=0) / batch_size
-                        # import code; code.interact(local=dict(globals(), **locals()))
+                        number_of_samples_per_pixel = torch.count_nonzero(tmp, dim=0)
+                        number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
+                        K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
 
                 K_change = minmax_on_fm(K_change)
                 
@@ -226,7 +236,8 @@ class LaterallyConnectedLayer(nn.Module):
             L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
 
         filtered_L = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(L, fm_indices)])
-        self.O = A + self.theta * filtered_L
+        self.O = (1 - self.theta) * A + self.theta * filtered_L
+        # import code; code.interact(local=dict(globals(), **locals()))
 
         # lehl@2022-03-30: TODO - Is this still needed?
         # if self.training:
