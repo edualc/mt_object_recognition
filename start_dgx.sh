@@ -1,1 +1,1 @@
-srun --job-name=lehldock --pty --ntasks=1 --cpus-per-task=4 --mem=32G --gres=gpu:1 ^Cidia-docker run --shm-size=16g -e NVIDIA_VISIBLE_DEVICES=7 -v /cluster/home/lehl/development/mt_object_recognition:/app lehl/mt_lcl python3 run_lateral_model.py --lcl;
+srun --job-name=lehldock --pty --ntasks=1 --cpus-per-task=4 --mem=32G --gres=gpu:1 nvidia-docker run --shm-size=16g -e NVIDIA_VISIBLE_DEVICES=7 -v /cluster/home/lehl/development/mt_object_recognition:/app lehl/mt_lcl python3 run_lateral_model.py --lcl;
