@@ -64,7 +64,7 @@ def train_network(config):
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19WithLCL_HyperParam' if config['use_lcl'] else 'Vgg19',
+            group='Vgg19WithLCL_HyperParam2' if config['use_lcl'] else 'Vgg19',
             # group='debug',
             name=wandb_run_name,
             config=config
@@ -79,7 +79,7 @@ def train_network(config):
 
     train_loader, val_loader, test_loader, corrupt_loader = get_loaders(config['batch_size'])
     
-    model.train_with_loader(train_loader, val_loader, num_epochs=config['num_epochs'])
+    model.train_with_loader(train_loader, val_loader, test_loader=corrupt_loader, num_epochs=config['num_epochs'])
 
     c_acc, c_loss = model.test(corrupt_loader)
     print(f"[{'VGG19+LCL' if config['use_lcl'] else 'VGG19'}] MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")

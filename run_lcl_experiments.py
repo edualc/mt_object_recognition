@@ -17,12 +17,12 @@ def run_experiment(config):
     os.system(cmd)
 
 def learning_rate_exploration(args, config):
-    for lr in [3e-4, 1e-3, 1e-4, 3e-5, 1e-5]:
+    for lr in [1e-3, 1e-4, 3e-5, 1e-5]:
         config['learning_rate'] = lr
         run_experiment(config)
 
 def alpha_exploration(args, config):
-    for alpha in [0.1, 0.3, 0.5, 0.7, 0.9]:
+    for alpha in [1e-2, 3e-3, 3e-4, 1e-5]:
         config['lcl_alpha'] = alpha
         run_experiment(config)
 
@@ -52,15 +52,15 @@ def main():
     args = parser.parse_args()
 
     base_config = {
-        'learning_rate': 3e-3,
+        'learning_rate': 3e-4,
         'dropout': 0.2,
         'num_epochs': 4,
         'num_multiplex': 4,
         'batch_size': 10,
-        'lcl_alpha': 0.1,
-        'lcl_theta': 0.1,
+        'lcl_alpha': 1e-3,
+        'lcl_theta': 0.2,
         'lcl_eta': 0.1,
-        'lcl_iota': 0.1
+        'lcl_iota': 0.5
     }
 
     if args.lr:
@@ -78,7 +78,9 @@ def main():
     if args.iota:
         iota_exploration(args, base_config)
 
-    print('Nothing to do! Exiting...')
+    print('Running just the base config.')
+    for i in range(3):
+        run_experiment(base_config)
 
 if __name__ == '__main__':
     main()

@@ -121,7 +121,7 @@ class VggWithLCL(nn.Module):
         x = self.classifier(x)
         return x
 
-    def train_with_loader(self, train_loader, val_loader, num_epochs=5):
+    def train_with_loader(self, train_loader, val_loader, test_loader=None, num_epochs=5):
         total_params = sum(p.numel() for p in self.parameters())
         print(f"[INFO]: {total_params:,} total parameters.")
         total_trainable_params = sum(
@@ -166,7 +166,14 @@ class VggWithLCL(nn.Module):
                 if current_iteration > 0 and (current_iteration % 1250) == 0:
                     self.save(f"models/vgg_with_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
                     val_acc, val_loss = self.test(val_loader)
-                    wandb.log({ 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }, commit=False)
+                    log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
+
+                    if test_loader:
+                        test_acc, test_loss = self.test(test_loader)
+                        log_dict['test_acc'] = test_acc
+                        log_dict['test_loss'] = test_loss
+
+                    wandb.log(log_dict, commit=False)
 
                 if (current_iteration % 250) == 0:
                     wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
