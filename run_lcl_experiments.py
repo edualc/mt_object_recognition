@@ -66,21 +66,22 @@ def main():
     if args.lr:
         learning_rate_exploration(args, base_config)
 
-    if args.alpha:
+    elif args.alpha:
         alpha_exploration(args, base_config)
 
-    if args.theta:
+    elif args.theta:
         theta_exploration(args, base_config)
 
-    if args.eta:
+    elif args.eta:
         eta_exploration(args, base_config)
 
-    if args.iota:
+    elif args.iota:
         iota_exploration(args, base_config)
 
-    print('Running just the base config.')
-    for i in range(3):
-        run_experiment(base_config)
+    else:
+        print('Running just the base config.')
+        for i in range(3):
+            run_experiment(base_config)
 
 if __name__ == '__main__':
     main()
