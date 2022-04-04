@@ -1,9 +1,25 @@
 import os
 import argparse
 
+def run_vgg_only():
+    config = {
+        'learning_rate': 0.001,
+        'dropout': 0.2,
+        'num_epochs': 4,
+        'num_multiplex': 4,
+        'batch_size': 10,
+        'use_lcl': False,
+        'lcl_alpha': 3e-4,
+        'lcl_theta': 0.5,
+        'lcl_eta': 0.1,
+        'lcl_iota': 0.5
+    }
+    run_experiment(config)
+
 def run_experiment(config):
     cmd = ' '.join([
-        'python run_lateral_model.py --lcl',
+        'python run_lateral_model.py',
+        '--lcl' if config['use_lcl'] else '',
         '--lr ' + str(config['learning_rate']),
         '--dropout ' + str(config['dropout']),
         '--num_epochs ' + str(config['num_epochs']),
@@ -48,22 +64,28 @@ def main():
     parser.add_argument('--theta', default=False, action='store_true', help='theta exploration (output = (1-theta)*A+theta*L)')
     parser.add_argument('--eta', default=False, action='store_true', help='eta exploration (noise)')
     parser.add_argument('--iota', default=False, action='store_true', help='iota exploration (argmax[(1-iota)*A+iota*L])')
+    parser.add_argument('--vgg_only', default=False, action='store_true', help='run pure VGG without LCL')
 
     args = parser.parse_args()
 
     base_config = {
-        'learning_rate': 3e-4,
+        'learning_rate': 1e-3,
         'dropout': 0.2,
         'num_epochs': 4,
         'num_multiplex': 4,
         'batch_size': 10,
-        'lcl_alpha': 1e-3,
-        'lcl_theta': 0.2,
+        'lcl_alpha': 3e-4,
+        'use_lcl': True,
+        'lcl_theta': 0.5,
         'lcl_eta': 0.1,
         'lcl_iota': 0.5
     }
 
-    if args.lr:
+    if args.vgg_only:
+        for i in range(6):
+            run_vgg_only()
+
+    elif args.lr:
         learning_rate_exploration(args, base_config)
 
     elif args.alpha:
