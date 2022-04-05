@@ -76,7 +76,7 @@ def main():
         'batch_size': 10,
         'lcl_alpha': 3e-4,
         'use_lcl': True,
-        'lcl_theta': 0.5,
+        'lcl_theta': 0.2,
         'lcl_eta': 0.1,
         'lcl_iota': 0.5
     }

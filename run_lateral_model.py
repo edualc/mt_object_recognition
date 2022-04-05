@@ -64,7 +64,7 @@ def train_network(config):
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19WithLCL_eval' if config['use_lcl'] else 'Vgg19_eval',
+            group='Vgg19WithLCL_eval2' if config['use_lcl'] else 'Vgg19_eval',
             # group='debug',
             name=wandb_run_name,
             config=config
