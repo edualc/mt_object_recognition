@@ -93,6 +93,9 @@ def check_mnist_c(identifier):
                 'accuracy': c_acc
             })
 
+            df = pd.DataFrame(data)
+            df.to_csv('mnist_c__' + identifier + '.csv')
+
     df = pd.DataFrame(data)
     df.to_csv('mnist_c__' + identifier + '.csv')
 
