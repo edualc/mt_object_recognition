@@ -70,7 +70,7 @@ def check_mnist_c(identifier):
 
     data = []
 
-    for model_file in model_files:
+    for model_file in tqdm(model_files, desc='Models'):
         model_path = 'models/vgg_with_lcl/' + model_file
 
         model = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'],
@@ -78,7 +78,7 @@ def check_mnist_c(identifier):
             lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
         model.load(model_path)
 
-        for variant in mnist_c_variants:
+        for variant in tqdm(mnist_c_variants, desc='MNIST-C Variants', leave=False):
             loader = load_mnistc('images/mnist_c/' + mnist_c_variant)
             c_acc, c_loss = model.test(loader)
 
