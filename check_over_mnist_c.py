@@ -79,7 +79,8 @@ def check_mnist_c(identifier):
         model.load(model_path)
 
         for variant in tqdm(mnist_c_variants, desc='MNIST-C Variants', leave=False):
-            loader = load_mnistc(variant)
+            dataset = load_mnistc(variant)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=1)
             c_acc, c_loss = model.test(loader)
 
             print(f"{model_file.ljust(45)}\t{variant.ljust(20)}\t{round(c_acc,4)}")
