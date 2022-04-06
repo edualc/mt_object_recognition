@@ -13,7 +13,7 @@ from tqdm import tqdm
 from lateral_connections import LateralModel, VggModel
 from lateral_connections import VggWithLCL
 from lateral_connections import MNISTCDataset
-from lateral_connections.loaders import get_loaders
+from lateral_connections.loaders import get_loaders, load_mnistc
 
 import datetime
 
