@@ -78,6 +78,9 @@ def check_mnist_c(identifier):
             lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
         model.load(model_path)
 
+        if config['use_lcl']:
+            model.features.lcl3.enable()
+
         for variant in tqdm(mnist_c_variants, desc='MNIST-C Variants', leave=False):
             dataset = load_mnistc(variant)
             loader = torch.utils.data.DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=1)
