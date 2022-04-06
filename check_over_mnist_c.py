@@ -79,7 +79,7 @@ def check_mnist_c(identifier):
         model.load(model_path)
 
         for variant in tqdm(mnist_c_variants, desc='MNIST-C Variants', leave=False):
-            loader = load_mnistc('images/mnist_c/' + variant)
+            loader = load_mnistc(variant)
             c_acc, c_loss = model.test(loader)
 
             print(f"{model_file.ljust(45)}\t{variant.ljust(20)}\t{round(c_acc,4)}")
