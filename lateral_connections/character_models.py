@@ -46,8 +46,8 @@ def make_layers(cfg: List[Union[str, int]], batch_norm: bool = False) -> nn.Sequ
             in_channels = v
     return nn.Sequential(*layers)
 
-def build_custom_vgg19(dropout, num_classes):
-    net = VGG(make_layers(cfgs["E"], batch_norm=False))
+def build_custom_vgg19(dropout, num_classes, config_ident='E'):
+    net = VGG(make_layers(cfgs[config_ident], batch_norm=False))
     net.classifier = nn.Sequential(
         nn.Linear(512 * 7 * 7, 4096),
         nn.ReLU(True),
@@ -216,6 +216,53 @@ class VggWithLCL(nn.Module):
         acc = correct / total
 
         return acc, total_loss
+
+class SmallVggWithLCL(VggWithLCL):
+    def __init__(self, num_classes, learning_rate, dropout, num_multiplex=4, do_wandb=False, run_identifier="",
+        lcl_alpha=0.1, lcl_eta=0.1, lcl_theta=0.1, lcl_iota=0.1):
+
+        super(VggWithLCL, self).__init__()
+        self.num_classes = num_classes
+        self.learning_rate = learning_rate
+        self.dropout = dropout
+        self.num_multiplex = num_multiplex
+        self.do_wandb = do_wandb
+        self.run_identifier = run_identifier
+
+        self.lcl_alpha = lcl_alpha
+        self.lcl_theta = lcl_theta
+        self.lcl_eta = lcl_eta
+        self.lcl_iota = lcl_iota
+
+        self.net = build_custom_vgg19(dropout=self.dropout, num_classes=self.num_classes, config_ident='D')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self._add_lcl_to_network()
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
+
+    def _add_lcl_to_network(self):
+        self.features = nn.Sequential(
+            OrderedDict([
+                ('pool1', self.net.features[:5]),
+                # ('lcl1',  LaterallyConnectedLayer(self.num_multiplex, 64, 112, 112, d=2, 
+                #     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
+                ('pool2', self.net.features[5:10]),
+                # ('lcl2',  LaterallyConnectedLayer(self.num_multiplex, 128, 56, 56, d=2, 
+                #     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
+                ('pool3', self.net.features[10:17]),
+                ('lcl3',  LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=2, disabled=False, 
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
+                ('pool4', self.net.features[17:24]),
+                # ('lcl4',  LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=2, 
+                #     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)),
+                ('pool5', self.net.features[24:]),
+            ])
+        )
+        self.avgpool = self.net.avgpool
+        self.classifier = self.net.classifier
+        self.to(self.device)
+        del self.net
 
 
 # GPU Performance Blogpost:
