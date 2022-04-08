@@ -70,7 +70,7 @@ def train_network(config):
     model.train_with_loader(train_loader, val_loader, test_loader=corrupt_loader, num_epochs=config['num_epochs'])
 
     c_acc, c_loss = model.test(corrupt_loader)
-    print(f"[{'VGG16+LCL' if config['use_lcl'] else 'VGG16'}] MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")
+    print(f"[{'VGG16+LCL'}] MNIST-C:\t\tAccuracy:{c_acc:1.4f}\tLoss:{c_loss:1.4f}")
 
     wandb.finish(quiet=True)
 
