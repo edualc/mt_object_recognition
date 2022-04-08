@@ -32,6 +32,11 @@ checkpoints = {
         'VGG19_LCL_2022-04-05_155542__it12500_e2.pt', 'VGG19_LCL_2022-04-05_155601__it17500_e3.pt',
         'VGG19_LCL_2022-04-05_205611__it18750_e3.pt', 'VGG19_LCL_2022-04-05_214333__it18750_e3.pt',
         'VGG19_LCL_2022-04-06_015226__it13750_e2.pt', 'VGG19_LCL_2022-04-06_023811__it16250_e3.pt'
+    ],
+    'vgg16_lcl': [
+        'VGG16_LCL_2022-04-07_112652__it18750_e3.pt','VGG16_LCL_2022-04-07_112710__it12500_e2.pt',
+        'VGG16_LCL_2022-04-07_202405__it15000_e3.pt','VGG16_LCL_2022-04-07_202410__it17500_e3.pt',
+        'VGG16_LCL_2022-04-08_013150__it18750_e3.pt','VGG16_LCL_2022-04-08_020051__it11250_e2.pt'
     ]
 }
 
@@ -50,6 +55,19 @@ configs = {
         'lcl_iota': 0.2
     },
     'lcl': {
+        'num_classes': 10,
+        'learning_rate': 1e-3,
+        'dropout': 0.2,
+        'num_epochs': 4,
+        'batch_size': 10,
+        'use_lcl': True,
+        'num_multiplex': 4,
+        'lcl_alpha': 1e-3,
+        'lcl_theta': 0.2,
+        'lcl_eta': 0.0,
+        'lcl_iota': 0.2
+    },
+    'vgg16_lcl': {
         'num_classes': 10,
         'learning_rate': 1e-3,
         'dropout': 0.2,
@@ -102,10 +120,13 @@ def check_mnist_c(identifier):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lcl', default=False, action='store_true')
+    parser.add_argument('--vgg16_lcl', default=False, action='store_true')
     args = parser.parse_args()    
 
     if args.lcl:
         check_mnist_c('lcl')
+    elif args.vgg16_lcl:
+        check_mnist_c('vgg16_lcl')
     else:
         check_mnist_c('vggonly')
 
