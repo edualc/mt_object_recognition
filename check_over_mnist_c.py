@@ -14,6 +14,7 @@ from lateral_connections import LateralModel, VggModel
 from lateral_connections import VggWithLCL
 from lateral_connections import MNISTCDataset
 from lateral_connections.loaders import get_loaders, load_mnistc
+from lateral_connections.character_models import SmallVggWithLCL
 
 import datetime
 
@@ -91,9 +92,15 @@ def check_mnist_c(identifier):
     for model_file in tqdm(model_files, desc='Models'):
         model_path = 'models/vgg_with_lcl/' + model_file
 
-        model = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'],
-            num_multiplex=config['num_multiplex'], do_wandb=False, run_identifier="",
-            lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
+        if identifier == 'vgg16_lcl':
+            model = SmallVggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'],
+                num_multiplex=config['num_multiplex'], do_wandb=False, run_identifier="",
+                lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
+
+        else:
+            model = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'],
+                num_multiplex=config['num_multiplex'], do_wandb=False, run_identifier="",
+                lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
         model.load(model_path)
 
         if config['use_lcl']:
