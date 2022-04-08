@@ -83,10 +83,16 @@ configs = {
     }
 }
 
-def check_mnist_c(identifier):
+def check_mnist_c(identifier, run_idx=None):
     config = configs[identifier]
     model_files = checkpoints[identifier]
 
+    if run_idx:
+        filtered_model_files = []
+        for model_index in [int(x) for x in run_idx]:
+            filtered_model_files.append(model_files[model_index])
+        model_files = filtered_model_files
+    
     data = []
 
     for model_file in tqdm(model_files, desc='Models'):
@@ -119,23 +125,30 @@ def check_mnist_c(identifier):
             })
 
             df = pd.DataFrame(data)
-            df.to_csv('mnist_c__' + identifier + '.csv')
+            if run_idx:
+                df.to_csv('mnist_c__' + identifier + ''.join(run_idx) + '.csv')
+            else:
+                df.to_csv('mnist_c__' + identifier + '.csv')
 
     df = pd.DataFrame(data)
-    df.to_csv('mnist_c__' + identifier + '.csv')
+    if run_idx:
+        df.to_csv('mnist_c__' + identifier + ''.join(run_idx) + '.csv')
+    else:
+        df.to_csv('mnist_c__' + identifier + '.csv')
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--lcl', default=False, action='store_true')
     parser.add_argument('--vgg16_lcl', default=False, action='store_true')
+    parser.add_argument('--run_ids', nargs='+', default=None)
     args = parser.parse_args()    
 
     if args.lcl:
-        check_mnist_c('lcl')
+        check_mnist_c('lcl', args.run_ids)
     elif args.vgg16_lcl:
-        check_mnist_c('vgg16_lcl')
+        check_mnist_c('vgg16_lcl', args.run_ids)
     else:
-        check_mnist_c('vggonly')
+        check_mnist_c('vggonly', args.run_ids)
 
 
 if __name__ == '__main__':
