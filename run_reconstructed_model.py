@@ -59,7 +59,7 @@ def train_network(config):
         num_multiplex=config['num_multiplex'], run_identifier=wandb_run_name,
         lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
     del vgg
-    
+
     train_loader, val_loader, test_loader, corrupt_loader = get_loaders(config['batch_size'], corruption=config['mnistc_corruption'])
     
     model.train_with_loader(train_loader, val_loader, test_loader=corrupt_loader, num_epochs=config['num_epochs'])
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate of VGG19\'s optimizer')
     parser.add_argument('--num_multiplex', type=int, default=4, help='Number of multiplex cells in LCL layers')
     parser.add_argument('--batch_size', type=int, default=10, help='Batch size')
-    parser.add_argument('--num_epochs', type=int, default=4, help='Number of epochs trained')
+    parser.add_argument('--num_epochs', type=int, default=8, help='Number of epochs trained')
     parser.add_argument('--lcl_alpha', type=float, default=1e-3, help='Rate at which kernel K is changed by K_change')
     parser.add_argument('--lcl_eta', type=float, default=0.0, help='Rate at which the output is changed by O=(1-eta)*A+eta*L')
     parser.add_argument('--lcl_theta', type=float, default=0.2, help='How much the noise is added to the LCL training (breaking symmetry)')
