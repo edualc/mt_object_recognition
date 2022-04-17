@@ -74,10 +74,10 @@ class LaterallyConnectedLayer(nn.Module):
         self.register_parameter('M', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
 
     def __repr__(self):
-        return f"{'' if self.disabled else '*'}{self.__class__.__name__}({self.n}, ({self.num_fm}, {self.fm_height}, {self.fm_width}), d={str(self.d)}, disabled={str(self.disabled)}, update={str(self.training)})"
+        return f"{self.__class__.__name__}({self.n.item()}, ({self.num_fm.item()}, {self.fm_height.item()}, {self.fm_width.item()}), d={str(self.d.item())}, disabled={str(self.disabled)}, update={str(self.training)})"
 
     def pad_activations(self, A):
-        padded_A = torch.zeros(A.shape[:-2] + (self.prd*self.d+A.shape[-2], self.prd*self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
+        padded_A = torch.zeros(A.shape[:-2] + (self.prd+self.d+A.shape[-2], self.prd+self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
         padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = A
         return symmetric_padding(padded_A, 2*self.prd)
 

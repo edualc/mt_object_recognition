@@ -27,7 +27,7 @@ def load_mnistc(dirname=None, train=False):
 def load_mnist(train=False):
     return MNIST('images/mnist/', train=train, transform=image_transform(), download=True)
 
-def get_loaders(batch_size):
+def get_loaders(batch_size, corruption='line'):
     dataset = load_mnist(train=True)
     train_size = 50000
     eval_size = len(dataset) - train_size
@@ -36,6 +36,6 @@ def get_loaders(batch_size):
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=1)
     eval_loader = torch.utils.data.DataLoader(eval_dataset, batch_size=batch_size, shuffle=False, num_workers=1)
     test_loader = torch.utils.data.DataLoader(load_mnist(), batch_size=batch_size, shuffle=False, num_workers=1)
-    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(), batch_size=batch_size, shuffle=False, num_workers=1)
+    corrupt_loader = torch.utils.data.DataLoader(load_mnistc(dirname=corruption), batch_size=batch_size, shuffle=False, num_workers=1)
 
     return train_loader, eval_loader, test_loader, corrupt_loader

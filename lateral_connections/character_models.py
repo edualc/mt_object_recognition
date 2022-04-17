@@ -265,6 +265,169 @@ class SmallVggWithLCL(VggWithLCL):
         del self.net
 
 
+class VGGReconstructionLCL(nn.Module):
+    def __init__(self, vgg, learning_rate=3e-4, num_multiplex=4, run_identifier="",
+        lcl_distance=4, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2):
+
+        super(VGGReconstructionLCL, self).__init__()
+
+        self.vgg = vgg
+        self.num_classes = self.vgg.num_classes
+        self.device = self.vgg.device
+
+        self.run_identifier = run_identifier
+
+        self.learning_rate = learning_rate
+
+        self.num_multiplex = num_multiplex
+        self.lcl_distance = lcl_distance
+        self.lcl_alpha = lcl_alpha
+        self.lcl_theta = lcl_theta
+        self.lcl_eta = lcl_eta
+        self.lcl_iota = lcl_iota
+
+        self._reconstruct_from_vgg()
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
+
+    # lehl@2022-04-17: Replacement of Convnet/FC layers after LCL through only new FC layers,
+    # where the number of parameters is changed such that the majority of parameters lie in the LCL
+    # (and thus roughly equal numbers of parameters are used between VGG19 and the reconstruction)
+    #
+    def _reconstruct_from_vgg(self):
+        self.features = nn.Sequential(
+            OrderedDict([
+                ('vgg19_to_pool3', nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))),
+                ('lcl3', LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota))
+            ])
+        )
+
+        # Freeze the params of the previous layers of VGG19
+        #
+        for param in self.features.vgg19_to_pool3.parameters():
+            param.requires_grad = False
+
+        self.avgpool = nn.AdaptiveAvgPool2d((14, 14))
+        self.classifier = nn.Sequential(
+            nn.Linear(256*14*14, 1089),
+            nn.ReLU(True),
+            nn.Dropout(p=0.2),
+            nn.Linear(1089, self.num_classes)
+        )
+
+        # Delete the pretrained "full" VGG19, since we're only
+        # interested in using it a pretraining for earlier layers
+        #
+        del self.vgg
+        self.to(self.device)
+
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path):
+        self.load_state_dict(torch.load(path))
+        self.eval()
+    
+    def forward(self, x):
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
+
+    def train_with_loader(self, train_loader, val_loader, test_loader=None, num_epochs=5):
+        for epoch in range(num_epochs):
+            print(f"[INFO]: Epoch {epoch} of {num_epochs}")
+            self.train()
+
+            correct = 0
+            total = 0
+            total_loss = 0
+            counter = 0
+
+            agg_correct = 0
+            agg_total = 0
+            agg_loss = 0
+
+            # Training Loop
+            for i, (images, labels) in tqdm(enumerate(train_loader, 0), total=len(train_loader), desc='Training'):
+                counter += 1
+                
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                outputs = self(images)
+                loss = self.loss_fn(outputs, labels)
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                _, preds = torch.max(outputs, 1)
+        
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+                total_loss += (loss.item() / labels.size(0))
+
+                current_iteration = epoch*len(train_loader) + i
+
+                if current_iteration > 0 and (current_iteration % 1250) == 0:
+                    self.save(f"models/vgg_reconstructed_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
+                    val_acc, val_loss = self.test(val_loader)
+                    log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
+
+                    if test_loader:
+                        test_acc, test_loss = self.test(test_loader)
+                        log_dict['test_acc'] = test_acc
+                        log_dict['test_loss'] = test_loss
+
+                    wandb.log(log_dict, commit=False)
+
+                if (current_iteration % 250) == 0:
+                    wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
+                    
+                    agg_correct += correct
+                    agg_total += total
+                    agg_loss += total_loss
+
+                    correct = 0
+                    total = 0
+                    total_loss = 0
+                    counter = 0
+
+            wandb.log({'epoch': epoch, 'iteration': current_iteration, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total})
+
+    def test(self, test_loader):
+        self.eval()
+
+        correct = 0
+        total = 0
+        total_loss = 0
+        counter = 0
+
+        # Evaluation Loop
+        for i, (images, labels) in tqdm(enumerate(test_loader, 0), total=len(test_loader), desc='Testing'):
+            counter += 1
+            images = images.to(self.device)
+            labels = labels.to(self.device)
+
+            outputs = self(images)
+            loss = self.loss_fn(outputs, labels)
+            
+            _, preds = torch.max(outputs, 1)
+    
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+            total_loss += (loss.item() / labels.size(0))
+
+        total_loss /= counter
+        acc = correct / total
+
+        return acc, total_loss
+
+
 # GPU Performance Blogpost:
 # https://towardsdatascience.com/7-tips-for-squeezing-maximum-performance-from-pytorch-ca4a40951259
 #
