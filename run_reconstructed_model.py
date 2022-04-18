@@ -46,7 +46,7 @@ def train_network(config):
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19_Reconstructed',
+            group='Vgg19_Reconstructed_KHeatmap',
             # group='debug',
             name=wandb_run_name,
             config=config
@@ -61,7 +61,7 @@ def train_network(config):
     del vgg
 
     train_loader, val_loader, test_loader, corrupt_loader = get_loaders(config['batch_size'], corruption=config['mnistc_corruption'])
-    
+
     model.train_with_loader(train_loader, val_loader, test_loader=corrupt_loader, num_epochs=config['num_epochs'])
 
     c_acc, c_loss = model.test(corrupt_loader)
@@ -73,12 +73,12 @@ def train_network(config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate of VGG19\'s optimizer')
+    parser.add_argument('--lr', type=float, default=3e-3, help='Learning rate of VGG19\'s optimizer')
     parser.add_argument('--num_multiplex', type=int, default=4, help='Number of multiplex cells in LCL layers')
     parser.add_argument('--batch_size', type=int, default=10, help='Batch size')
-    parser.add_argument('--num_epochs', type=int, default=8, help='Number of epochs trained')
-    parser.add_argument('--lcl_alpha', type=float, default=1e-3, help='Rate at which kernel K is changed by K_change')
-    parser.add_argument('--lcl_eta', type=float, default=0.0, help='Rate at which the output is changed by O=(1-eta)*A+eta*L')
+    parser.add_argument('--num_epochs', type=int, default=5, help='Number of epochs trained')
+    parser.add_argument('--lcl_alpha', type=float, default=3e-3, help='Rate at which kernel K is changed by K_change')
+    parser.add_argument('--lcl_eta', type=float, default=0.01, help='Rate at which the output is changed by O=(1-eta)*A+eta*L')
     parser.add_argument('--lcl_theta', type=float, default=0.2, help='How much the noise is added to the LCL training (breaking symmetry)')
     parser.add_argument('--lcl_iota', type=float, default=0.2, help='Rate at which the argmax((1-iota)*A+iota*L) is calculated to determine active multiplex cells')
     parser.add_argument('--model_path', type=str, default='models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt', help='Vgg19 pretrained model to use')

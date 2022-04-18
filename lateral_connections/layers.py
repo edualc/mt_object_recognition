@@ -189,12 +189,25 @@ class LaterallyConnectedLayer(nn.Module):
                         # calculate the product of all feature maps (source) together with the
                         # to-be-influenced feature map (target) efficiently
                         #
+                        # Initially, self.A contains [batch_size, num_fm, fm_height, fm_width] dimensions
+                        #
+                        # Designations of einsum characters:
+                        #   a:  Extra dim to ensure each FM in target is multipled with the whole source blob
+                        #   b:  Feature Map #
+                        #   c:  Batch (see the transpose(0,1) calls)
+                        #   d:  Feature Map Height
+                        #   e:  Feature Map Width
+                        #
                         tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
                         
                         # inhibit inactive multiplex cell changes
                         #
                         for b in range(batch_size):
-                            tmp[b, inactive_multiplex_idx[b,:]] = 0
+                            # lehl@2022-08-18: Only source and target feature maps that are active
+                            # should be changed/influenced by the changes calculated here
+                            #
+                            tmp[b, inactive_multiplex_idx[b,:], :] = 0
+                            tmp[b, :, inactive_multiplex_idx[b,:]] = 0
 
                         # Average across the batch size
                         #

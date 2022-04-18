@@ -4,6 +4,8 @@ from PIL import Image
 from tqdm import tqdm
 import datetime
 
+import matplotlib.pyplot as plt
+
 import torch
 import torch.nn as nn
 from torch import optim
@@ -299,7 +301,7 @@ class VGGReconstructionLCL(nn.Module):
         self.features = nn.Sequential(
             OrderedDict([
                 ('vgg19_to_pool3', nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))),
-                ('lcl3', LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                ('lcl', LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota))
             ])
         )
@@ -386,7 +388,14 @@ class VGGReconstructionLCL(nn.Module):
                     wandb.log(log_dict, commit=False)
 
                 if (current_iteration % 250) == 0:
-                    wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
+                    plot_data = torch.mean(self.features.lcl.K.cpu(), dim=(-2,-1))
+                    plt.imshow(plot_data, cmap='viridis', vmin=0, vmax=1)
+                    plt.suptitle(f"Iteration {current_iteration} (Epoch {epoch})\nMin: {torch.min(plot_data):.4f}, Mean: {torch.mean(plot_data):.4f}, Max: {torch.max(plot_data):.4f}")
+                    wandb.log({ 'K_heatmap': plt, 'iteration': current_iteration })
+                    plt.close()
+
+                    if i > 0:
+                        wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
                     
                     agg_correct += correct
                     agg_total += total
