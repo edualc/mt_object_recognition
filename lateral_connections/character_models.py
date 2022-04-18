@@ -269,7 +269,7 @@ class SmallVggWithLCL(VggWithLCL):
 
 class VGGReconstructionLCL(nn.Module):
     def __init__(self, vgg, learning_rate=3e-4, num_multiplex=4, run_identifier="",
-        lcl_distance=4, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2):
+        lcl_distance=3, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2):
 
         super(VGGReconstructionLCL, self).__init__()
 
@@ -300,7 +300,7 @@ class VGGReconstructionLCL(nn.Module):
     def _reconstruct_from_vgg(self):
         self.features = nn.Sequential(
             OrderedDict([
-                ('vgg19_to_pool3', nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))),
+                ('vgg19_unit', nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))),
                 ('lcl', LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota))
             ])
@@ -308,15 +308,16 @@ class VGGReconstructionLCL(nn.Module):
 
         # Freeze the params of the previous layers of VGG19
         #
-        for param in self.features.vgg19_to_pool3.parameters():
+        for param in self.features.vgg19_unit.parameters():
             param.requires_grad = False
 
-        self.avgpool = nn.AdaptiveAvgPool2d((14, 14))
+        # self.avgpool = nn.AdaptiveAvgPool2d((14, 14))
+        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.classifier = nn.Sequential(
-            nn.Linear(256*14*14, 1089),
+            nn.Linear(256*14*14, 440),
             nn.ReLU(True),
-            nn.Dropout(p=0.2),
-            nn.Linear(1089, self.num_classes)
+            # nn.Dropout(p=0.2),
+            nn.Linear(440, self.num_classes)
         )
 
         # Delete the pretrained "full" VGG19, since we're only
@@ -334,7 +335,8 @@ class VGGReconstructionLCL(nn.Module):
     
     def forward(self, x):
         x = self.features(x)
-        x = self.avgpool(x)
+        # x = self.avgpool(x)
+        x = self.maxpool(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
         return x

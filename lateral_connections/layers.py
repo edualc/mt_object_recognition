@@ -108,11 +108,6 @@ class LaterallyConnectedLayer(nn.Module):
         if self.disabled:
             return torch.clone(A)
 
-        # # TODO: Pavel said no
-        # # check if grad is still there in layers around
-        # with torch.no_grad():
-        # import code; code.interact(local=dict(globals(), **locals()))
-
         with torch.no_grad():
             batch_size = A.shape[0]
 
@@ -203,14 +198,11 @@ class LaterallyConnectedLayer(nn.Module):
                         # inhibit inactive multiplex cell changes
                         #
                         for b in range(batch_size):
-                            tmp[b, inactive_multiplex_idx[b,:]] = 0
-
-                            # lehl@2022-04-18: TODO: check further
-                            # # lehl@2022-04-18: Only source and target feature maps that are active
-                            # # should be changed/influenced by the changes calculated here
-                            # #
-                            # tmp[b, inactive_multiplex_idx[b,:], :] = 0
-                            # tmp[b, :, inactive_multiplex_idx[b,:]] = 0
+                            # lehl@2022-04-18: Only source and target feature maps that are active
+                            # should be changed/influenced by the changes calculated here
+                            #
+                            tmp[b, inactive_multiplex_idx[b,:], :] = 0
+                            tmp[b, :, inactive_multiplex_idx[b,:]] = 0
 
                         # Average across the batch size
                         #

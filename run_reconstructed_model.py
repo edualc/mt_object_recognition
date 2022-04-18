@@ -31,6 +31,8 @@ def main(args):
         'lcl_eta': args.lcl_eta,
         'lcl_theta': args.lcl_theta,
         'lcl_iota': args.lcl_iota,
+        'lcl_distance': args.lcl_distance,
+        'lcl_k': 2*args.lcl_distance+1,
         'mnistc_corruption': 'gaussian_noise',
         'model_path': args.model_path
     }
@@ -46,7 +48,7 @@ def train_network(config):
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19_Reconstructed_KHeatmap',
+            group='Vgg19_Reconstructed_KHeatmap2',
             # group='debug',
             name=wandb_run_name,
             config=config
@@ -77,6 +79,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_multiplex', type=int, default=4, help='Number of multiplex cells in LCL layers')
     parser.add_argument('--batch_size', type=int, default=10, help='Batch size')
     parser.add_argument('--num_epochs', type=int, default=5, help='Number of epochs trained')
+    parser.add_argument('--lcl_distance', type=int, default=3, help='Size of kernel filters for K, as k=2*d+1 with [k x k] sized filters')
     parser.add_argument('--lcl_alpha', type=float, default=1e-3, help='Rate at which kernel K is changed by K_change')
     parser.add_argument('--lcl_eta', type=float, default=0.01, help='Rate at which the output is changed by O=(1-eta)*A+eta*L')
     parser.add_argument('--lcl_theta', type=float, default=0.2, help='How much the noise is added to the LCL training (breaking symmetry)')
