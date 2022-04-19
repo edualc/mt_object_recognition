@@ -268,7 +268,7 @@ class SmallVggWithLCL(VggWithLCL):
 
 
 class VGGReconstructionLCL(nn.Module):
-    def __init__(self, vgg, learning_rate=3e-4, num_multiplex=4, run_identifier="",
+    def __init__(self, vgg, after_pooling=3, learning_rate=3e-4, num_multiplex=4, run_identifier="",
         lcl_distance=2, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2):
 
         super(VGGReconstructionLCL, self).__init__()
@@ -279,6 +279,7 @@ class VGGReconstructionLCL(nn.Module):
 
         self.run_identifier = run_identifier
 
+        self.after_pooling = after_pooling
         self.learning_rate = learning_rate
 
         self.num_multiplex = num_multiplex
@@ -298,32 +299,58 @@ class VGGReconstructionLCL(nn.Module):
     # (and thus roughly equal numbers of parameters are used between VGG19 and the reconstruction)
     #
     def _reconstruct_from_vgg(self):
-        self.features = nn.Sequential(
-            # OrderedDict([
-            #     ('vgg19_unit', nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))),
-            #     ('lcl', LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
-            #         alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota))
-            # ])
-            OrderedDict([
-                ('vgg19_unit', nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4)))),
-                ('lcl', LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
-                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota))
-            ])
-        )
+        if self.after_pooling == 1:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1)))
+            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 64, 112, 112, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)
+            num_fully_connected = 687
+            adaptive_pooling_size = 56
+            fc_size = 64*adaptive_pooling_size*adaptive_pooling_size
+
+        elif self.after_pooling == 2:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2)))
+            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 128, 56, 56, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)
+            num_fully_connected = 1326
+            adaptive_pooling_size = 28
+            fc_size = 128*adaptive_pooling_size*adaptive_pooling_size
+
+        elif self.after_pooling == 3:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))
+            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)
+            num_fully_connected = 2260
+            adaptive_pooling_size = 14
+            fc_size = 256*adaptive_pooling_size*adaptive_pooling_size
+
+        elif self.after_pooling == 4:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4)))
+            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)
+            num_fully_connected = 1385
+            adaptive_pooling_size = 7
+            fc_size = 512*adaptive_pooling_size*adaptive_pooling_size
+
+        elif self.after_pooling == 5:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4) + list(self.vgg.features.pool5)))
+            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 512, 7, 7, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota)
+            num_fully_connected = 1385
+            adaptive_pooling_size = 7
+            fc_size = 512*adaptive_pooling_size*adaptive_pooling_size
+
+        self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit), ('lcl', lcl_layer) ]) )
 
         # Freeze the params of the previous layers of VGG19
         #
         for param in self.features.vgg19_unit.parameters():
             param.requires_grad = False
 
-        # self.avgpool = nn.AdaptiveAvgPool2d((14, 14))
-        self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.maxpool = nn.AdaptiveMaxPool2d((adaptive_pooling_size, adaptive_pooling_size))
         self.classifier = nn.Sequential(
-            # nn.Linear(256*14*14, 440),
-            nn.Linear(512*7*7, 803),
+            nn.Linear(fc_size, num_fully_connected),
             nn.ReLU(True),
-            # nn.Dropout(p=0.2),
-            nn.Linear(803, self.num_classes)
+            nn.Linear(num_fully_connected, self.num_classes)
         )
 
         # Delete the pretrained "full" VGG19, since we're only
