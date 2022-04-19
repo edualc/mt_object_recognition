@@ -48,7 +48,7 @@ def train_network(config):
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19_Reconstructed_KHeatmap2',
+            group='Vgg19_Reconstructed_KHeatmap_LCL4',
             # group='debug',
             name=wandb_run_name,
             config=config
