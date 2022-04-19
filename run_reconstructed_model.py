@@ -42,7 +42,7 @@ def main(args):
 
 def train_network(config):
     base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    wandb_run_name = base_name + '_LCL' + str(args.after_pooling)
+    wandb_run_name = base_name + '_LCL' + str(args.after_pooling) + '_d' + str(args.lcl_distance)
 
     if DO_WANDB:
         wandb.login(key='efd0a05b7bd26ed445bf073625a373b845fc9385')
