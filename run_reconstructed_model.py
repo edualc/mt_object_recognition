@@ -86,6 +86,7 @@ if __name__ == '__main__':
     parser.add_argument('--lcl_eta', type=float, default=0.01, help='Rate at which the output is changed by O=(1-eta)*A+eta*L')
     parser.add_argument('--lcl_theta', type=float, default=0.2, help='How much the noise is added to the LCL training (breaking symmetry)')
     parser.add_argument('--lcl_iota', type=float, default=0.2, help='Rate at which the argmax((1-iota)*A+iota*L) is calculated to determine active multiplex cells')
+    # WandB: https://wandb.ai/lehl/MT_LateralConnections/runs/1d4yqrn9?workspace=user-lehl
     parser.add_argument('--model_path', type=str, default='models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt', help='Vgg19 pretrained model to use')
     parser.add_argument('--after_pooling', type=int, default=3, help='after which pooling block the LCL is placed (1-5)')
 
