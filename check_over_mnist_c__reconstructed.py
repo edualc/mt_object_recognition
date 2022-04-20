@@ -79,6 +79,7 @@ def check_mnist_c(identifier, run_idx=None):
     for model_file in tqdm(model_files, desc='Models'):
         model_path = 'models/vgg_reconstructed_lcl/' + model_file
 
+        vgg = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=0.2)
         model = VGGReconstructionLCL(vgg, learning_rate=config['learning_rate'], after_pooling=config['after_pooling'],
             num_multiplex=config['num_multiplex'], run_identifier='', lcl_distance=config['lcl_distance'],
             lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
