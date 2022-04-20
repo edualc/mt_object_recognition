@@ -37,37 +37,37 @@ mnist_c_variants = [
     'gaussian_noise',
 ]
 
-model_files = [
-    '2022-04-19_194332_LCL5_d2__it16250_e3.pt',
-    '2022-04-19_194337_LCL5_d2__it21250_e4.pt',
-    '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
-    '2022-04-19_194505_LCL5_d2__it11250_e2.pt',
-    '2022-04-19_081920_LCL5__it21250_e4.pt',
-
-    # Early Stopping 3 Checkpoints
-    # '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
-    # '2022-04-19_194337_LCL5_d2__it12500_e2.pt',
-    # '2022-04-19_194332_LCL5_d2__it5000_e1.pt', # SAME
-    # '2022-04-19_194505_LCL5_d2__it11250_e2.pt', # SAME
-    # '2022-04-19_081920_LCL5__it8750_e1.pt',
-]
-
-config = {
-    'num_classes': 10,
-    'learning_rate': 3e-4,
-    'num_multiplex': 4,
-    'batch_size': 10,
-    'num_epochs': 5,
-    'lcl_alpha': 3e-4,
-    'lcl_eta': 0.01,
-    'lcl_theta': 0.2,
-    'lcl_iota': 0.2,
-    'lcl_distance': 2,
-    'lcl_k': 5,
-    'after_pooling': 5
-}
-
 def check_mnist_c(identifier, run_idx=None):
+    model_files = [
+        '2022-04-19_194332_LCL5_d2__it16250_e3.pt',
+        '2022-04-19_194337_LCL5_d2__it21250_e4.pt',
+        '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
+        '2022-04-19_194505_LCL5_d2__it11250_e2.pt',
+        '2022-04-19_081920_LCL5__it21250_e4.pt',
+
+        # Early Stopping 3 Checkpoints
+        # '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
+        # '2022-04-19_194337_LCL5_d2__it12500_e2.pt',
+        # '2022-04-19_194332_LCL5_d2__it5000_e1.pt', # SAME
+        # '2022-04-19_194505_LCL5_d2__it11250_e2.pt', # SAME
+        # '2022-04-19_081920_LCL5__it8750_e1.pt',
+    ]
+
+    config = {
+        'num_classes': 10,
+        'learning_rate': 3e-4,
+        'num_multiplex': 4,
+        'batch_size': 10,
+        'num_epochs': 5,
+        'lcl_alpha': 3e-4,
+        'lcl_eta': 0.01,
+        'lcl_theta': 0.2,
+        'lcl_iota': 0.2,
+        'lcl_distance': 2,
+        'lcl_k': 5,
+        'after_pooling': 5
+    }
+
     if run_idx:
         filtered_model_files = []
         for model_index in [int(x) for x in run_idx]:
