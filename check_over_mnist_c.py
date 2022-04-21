@@ -27,29 +27,31 @@ mnist_c_variants = [
     # 'pixelate',
     # 'zoom_blur',
     # 'fog',
-    'spatter',
-    'shot_noise',
-    'pessimal_noise',
+    
+    # 'spatter',
+    # 'shot_noise',
+    # 'pessimal_noise',
     'identity',
-    'dotted_line',
-    'impulse_noise',
-    'line',
-    'gaussian_noise',
+    # 'dotted_line',
+    # 'impulse_noise',
+    # 'line',
+    # 'gaussian_noise',
 ]
 
 checkpoints = {
     'vggonly': [
-        'VGG19_2022-04-04_175945__it15000_e3.pt',
-        'VGG19_2022-04-04_183636__it13750_e2.pt',
-        'VGG19_2022-04-04_191333__it18750_e3.pt',
-        'VGG19_2022-04-04_160910__it17500_e3.pt',
-        'VGG19_2022-04-04_172253__it16250_e3.pt',
-        'VGG19_2022-04-04_164603__it18750_e3.pt',
+        # These are the models with lowest val_loss:
+        # 'VGG19_2022-04-04_175945__it15000_e3.pt',
+        # 'VGG19_2022-04-04_183636__it13750_e2.pt',
+        # 'VGG19_2022-04-04_191333__it18750_e3.pt',
+        # 'VGG19_2022-04-04_160910__it17500_e3.pt',
+        # 'VGG19_2022-04-04_172253__it16250_e3.pt',
+        # 'VGG19_2022-04-04_164603__it18750_e3.pt',
 
         # These are the models with early stopping @3:
-        #     'VGG19_2022-04-04_160910__it8750_e1.pt', 'VGG19_2022-04-04_164603__it18750_e3.pt',
-        #     'VGG19_2022-04-04_172253__it11250_e2.pt', 'VGG19_2022-04-04_175945__it12500_e2.pt',
-        #     'VGG19_2022-04-04_183636__it16250_e3.pt', 'VGG19_2022-04-04_191333__it10000_e2.pt'
+        'VGG19_2022-04-04_160910__it8750_e1.pt', 'VGG19_2022-04-04_164603__it18750_e3.pt',
+        'VGG19_2022-04-04_172253__it11250_e2.pt', 'VGG19_2022-04-04_175945__it12500_e2.pt',
+        'VGG19_2022-04-04_183636__it16250_e3.pt', 'VGG19_2022-04-04_191333__it10000_e2.pt'
     ],
     'lcl': [
         'VGG19_LCL_2022-04-05_155542__it12500_e2.pt', 'VGG19_LCL_2022-04-05_155601__it17500_e3.pt',
