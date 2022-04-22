@@ -39,14 +39,14 @@ mnist_c_variants = [
 
 def check_mnist_c(identifier, run_idx=None):
     model_files = [
+        # '2022-04-19_194344_LCL5_d2__it21250_e4.pt',
         # '2022-04-19_194332_LCL5_d2__it16250_e3.pt',
         # '2022-04-19_194337_LCL5_d2__it21250_e4.pt',
-        # '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
         # '2022-04-19_194505_LCL5_d2__it11250_e2.pt',
         # '2022-04-19_081920_LCL5__it21250_e4.pt',
 
         # Early Stopping 3 Checkpoints
-        '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
+        '2022-04-19_194344_LCL5_d2__it21250_e4.pt', # SAME
         '2022-04-19_194337_LCL5_d2__it12500_e2.pt',
         '2022-04-19_194332_LCL5_d2__it5000_e1.pt', # SAME
         '2022-04-19_194505_LCL5_d2__it11250_e2.pt', # SAME
