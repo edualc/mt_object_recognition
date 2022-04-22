@@ -329,7 +329,7 @@ class VGGReconstructionLCL(nn.Module):
             num_lcl_params = lcl_num_parameters(pooling_layer)
             params_remaining = num_vgg_params - num_lcl_params
             divisor = (10 + (fc_input_size(pooling_layer)))
-            result = params_remaining // divisor
+            result = int(round(params_remaining / divisor,0))
 
             if result <= 0:
                 raise ArgumentError(f'LCL: Not enough parameters remaining for FC layers: #LCL: {num_lcl_params}, remaining: {params_remaining}')
