@@ -79,7 +79,11 @@ class LaterallyConnectedLayer(nn.Module):
     def pad_activations(self, A):
         padded_A = torch.zeros(A.shape[:-2] + (self.prd+self.d+A.shape[-2], self.prd+self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
         padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = A
-        return symmetric_padding(padded_A, 2*self.prd)
+        return padded_A
+        # lehl@2022-04-23: This should no longer be done, as too much of the feature
+        # maps are replaced!
+        #
+        # return symmetric_padding(padded_A, 2*self.prd)
 
     # Keep the layer at this stage and no longer update relevant matrices,
     # only allow the layer to perform inference
@@ -111,8 +115,11 @@ class LaterallyConnectedLayer(nn.Module):
         with torch.no_grad():
             batch_size = A.shape[0]
 
-            # Symmetric padding fix to remove border effect issues from 0-padding
-            symm_A = symmetric_padding(A, self.prd)
+            # lehl@2022-04-23: This should no longer be done, as too much of the feature
+            # maps are replaced!
+            #
+            # # Symmetric padding fix to remove border effect issues from 0-padding
+            # symm_A = symmetric_padding(A, self.prd)
 
             # Generate multiplex cells
             # ---
@@ -121,7 +128,7 @@ class LaterallyConnectedLayer(nn.Module):
             # for activations A of shape (32, 100, 50, 50) and n=4, we expect the new A to
             # be of shape (32, 4*100, 50, 50) with (bs, a, i, j) == (bs, a + 100, i, j)
             #
-            self.A = symm_A.repeat(1, self.n, 1, 1)
+            self.A = A.repeat(1, self.n, 1, 1)
 
             if self.training:
                 # Add noise to help break the symmetry between initially

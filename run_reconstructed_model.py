@@ -49,7 +49,7 @@ def train_network(config):
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19_Reconstructed_KHeatmap3',
+            group='Vgg19_Reconstructed_ZeroPad',
             # group='debug',
             name=wandb_run_name,
             config=config
