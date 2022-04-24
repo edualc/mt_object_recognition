@@ -115,22 +115,22 @@ def check_mnist_c(identifier, run_idx=None):
 
             df = pd.DataFrame(data)
             if run_idx:
-                df.to_csv('mnist_c__' + identifier + ''.join(run_idx) + '.csv')
+                df.to_csv('mnist_c__' + identifier + ''.join(run_idx) + '__all.csv')
             else:
-                df.to_csv('mnist_c__' + identifier + '.csv')
+                df.to_csv('mnist_c__' + identifier + '__all.csv')
 
     df = pd.DataFrame(data)
     if run_idx:
-        df.to_csv('mnist_c__' + identifier + ''.join(run_idx) + '.csv')
+        df.to_csv('mnist_c__' + identifier + ''.join(run_idx) + '__all.csv')
     else:
-        df.to_csv('mnist_c__' + identifier + '.csv')
+        df.to_csv('mnist_c__' + identifier + '__all.csv')
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--run_ids', nargs='+', default=None)
     args = parser.parse_args()    
 
-    check_mnist_c('vgg19r_lcl5_lr1e4__all', args.run_ids)
+    check_mnist_c('vgg19r_lcl5_lr1e4', args.run_ids)
 
 
 if __name__ == '__main__':
