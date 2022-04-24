@@ -1,0 +1,9 @@
+,model,mnist_c_variant,accuracy
+0,2022-04-19_194344_LCL5_d2__it21250_e4.pt,spatter,0.9579
+1,2022-04-19_194344_LCL5_d2__it21250_e4.pt,shot_noise,0.9775
+2,2022-04-19_194344_LCL5_d2__it21250_e4.pt,pessimal_noise,0.9252
+3,2022-04-19_194344_LCL5_d2__it21250_e4.pt,identity,0.9905
+4,2022-04-19_194344_LCL5_d2__it21250_e4.pt,dotted_line,0.9747
+5,2022-04-19_194344_LCL5_d2__it21250_e4.pt,impulse_noise,0.9623
+6,2022-04-19_194344_LCL5_d2__it21250_e4.pt,line,0.8953
+7,2022-04-19_194344_LCL5_d2__it21250_e4.pt,gaussian_noise,0.9663
