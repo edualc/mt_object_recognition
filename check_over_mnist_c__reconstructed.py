@@ -27,14 +27,20 @@ mnist_c_variants = [
     # 'pixelate',
     # 'zoom_blur',
     # 'fog',
-    'spatter',
-    'shot_noise',
-    'pessimal_noise',
-    'identity',
-    'dotted_line',
-    'impulse_noise',
-    'line',
-    'gaussian_noise',
+
+    # 'spatter',
+    # 'shot_noise',
+    # 'pessimal_noise',
+    # 'identity',
+    # 'dotted_line',
+    # 'impulse_noise',
+    # 'line',
+    # 'gaussian_noise',
+
+    'pixelate', 'dotted_line', 'gaussian_blur', 'elastic_transform', 'jpeg_compression', 'speckle_noise', 'identity',
+    'glass_blur', 'spatter', 'translate', 'fog', 'shear', 'scale', 'zigzag', 'defocus_blur', 'gaussian_noise',
+    'contrast', 'canny_edges', 'zoom_blur', 'line', 'pessimal_noise', 'rotate', 'brightness', 'shot_noise',
+    'saturate', 'motion_blur', 'snow', 'inverse', 'impulse_noise', 'stripe', 'quantize', 'frost'
 ]
 
 def check_mnist_c(identifier, run_idx=None):
@@ -124,7 +130,7 @@ def main():
     parser.add_argument('--run_ids', nargs='+', default=None)
     args = parser.parse_args()    
 
-    check_mnist_c('vgg19r_lcl5_lr1e4', args.run_ids)
+    check_mnist_c('vgg19r_lcl5_lr1e4__all', args.run_ids)
 
 
 if __name__ == '__main__':

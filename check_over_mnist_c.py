@@ -31,11 +31,16 @@ mnist_c_variants = [
     # 'spatter',
     # 'shot_noise',
     # 'pessimal_noise',
-    'identity',
+    # 'identity',
     # 'dotted_line',
     # 'impulse_noise',
     # 'line',
     # 'gaussian_noise',
+
+    'pixelate', 'dotted_line', 'gaussian_blur', 'elastic_transform', 'jpeg_compression', 'speckle_noise', 'identity',
+    'glass_blur', 'spatter', 'translate', 'fog', 'shear', 'scale', 'zigzag', 'defocus_blur', 'gaussian_noise',
+    'contrast', 'canny_edges', 'zoom_blur', 'line', 'pessimal_noise', 'rotate', 'brightness', 'shot_noise',
+    'saturate', 'motion_blur', 'snow', 'inverse', 'impulse_noise', 'stripe', 'quantize', 'frost'
 ]
 
 checkpoints = {
@@ -168,11 +173,11 @@ def main():
     args = parser.parse_args()    
 
     if args.lcl:
-        check_mnist_c('lcl', args.run_ids)
+        check_mnist_c('lcl__all', args.run_ids)
     elif args.vgg16_lcl:
-        check_mnist_c('vgg16_lcl', args.run_ids)
+        check_mnist_c('vgg16_lcl__all', args.run_ids)
     else:
-        check_mnist_c('vggonly', args.run_ids)
+        check_mnist_c('vggonly__all', args.run_ids)
 
 
 if __name__ == '__main__':
