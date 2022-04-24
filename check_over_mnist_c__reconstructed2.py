@@ -39,18 +39,27 @@ mnist_c_variants = [
 
 def check_mnist_c(identifier, run_idx=None):
     model_files = [
+
+        # Reruns without symmetric padding (lr=3e-4)
+        '2022-04-23_181034_LCL5_d2__it23750_e4.pt',
+        '2022-04-23_181111_LCL5_d2__it12500_e2.pt',
+        '2022-04-23_201731_LCL5_d2__it11250_e2.pt',
+        '2022-04-24_071904_LCL5_d2__it22500_e4.pt',
+        '2022-04-24_071930_LCL5_d2__it16250_e3.pt',
+
+        #
         # '2022-04-19_194344_LCL5_d2__it21250_e4.pt',
         # '2022-04-19_194332_LCL5_d2__it16250_e3.pt',
         # '2022-04-19_194337_LCL5_d2__it21250_e4.pt',
         # '2022-04-19_194505_LCL5_d2__it11250_e2.pt',
         # '2022-04-19_081920_LCL5__it21250_e4.pt',
 
-        # Early Stopping 3 Checkpoints
-        '2022-04-19_194344_LCL5_d2__it21250_e4.pt', # SAME
-        '2022-04-19_194337_LCL5_d2__it12500_e2.pt',
-        '2022-04-19_194332_LCL5_d2__it5000_e1.pt', # SAME
-        '2022-04-19_194505_LCL5_d2__it11250_e2.pt', # SAME
-        '2022-04-19_081920_LCL5__it8750_e1.pt',
+        # # Early Stopping 3 Checkpoints
+        # '2022-04-19_194344_LCL5_d2__it21250_e4.pt', # SAME
+        # '2022-04-19_194337_LCL5_d2__it12500_e2.pt',
+        # '2022-04-19_194332_LCL5_d2__it5000_e1.pt', # SAME
+        # '2022-04-19_194505_LCL5_d2__it11250_e2.pt', # SAME
+        # '2022-04-19_081920_LCL5__it8750_e1.pt',
     ]
 
     config = {
@@ -115,7 +124,7 @@ def main():
     parser.add_argument('--run_ids', nargs='+', default=None)
     args = parser.parse_args()    
 
-    check_mnist_c('vgg19r_lcl5__es3', args.run_ids)
+    check_mnist_c('vgg19r_lcl5_lr3e4', args.run_ids)
 
 
 if __name__ == '__main__':

@@ -39,11 +39,20 @@ mnist_c_variants = [
 
 def check_mnist_c(identifier, run_idx=None):
     model_files = [
-        '2022-04-19_194332_LCL5_d2__it16250_e3.pt',
-        '2022-04-19_194337_LCL5_d2__it21250_e4.pt',
-        '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
-        '2022-04-19_194505_LCL5_d2__it11250_e2.pt',
-        '2022-04-19_081920_LCL5__it21250_e4.pt',
+
+        # Reruns without symmetric padding (lr=1e-4)
+        '2022-04-23_201656_LCL5_d2__it15000_e3.pt',
+        '2022-04-23_201747_LCL5_d2__it23750_e4.pt',
+        '2022-04-24_004459_LCL5_d2__it23750_e4.pt',
+        '2022-04-24_004532_LCL5_d2__it10000_e2.pt',
+        '2022-04-24_025236_LCL5_d2__it11250_e2.pt',
+
+
+        # '2022-04-19_194332_LCL5_d2__it16250_e3.pt',
+        # '2022-04-19_194337_LCL5_d2__it21250_e4.pt',
+        # '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
+        # '2022-04-19_194505_LCL5_d2__it11250_e2.pt',
+        # '2022-04-19_081920_LCL5__it21250_e4.pt',
 
         # Early Stopping 3 Checkpoints
         # '2022-04-19_194332_LCL5_d2__it5000_e1.pt',
@@ -55,7 +64,7 @@ def check_mnist_c(identifier, run_idx=None):
 
     config = {
         'num_classes': 10,
-        'learning_rate': 3e-4,
+        'learning_rate': 1e-4,
         'num_multiplex': 4,
         'batch_size': 10,
         'num_epochs': 5,
@@ -115,7 +124,7 @@ def main():
     parser.add_argument('--run_ids', nargs='+', default=None)
     args = parser.parse_args()    
 
-    check_mnist_c('vgg19r_lcl5', args.run_ids)
+    check_mnist_c('vgg19r_lcl5_lr1e4', args.run_ids)
 
 
 if __name__ == '__main__':
