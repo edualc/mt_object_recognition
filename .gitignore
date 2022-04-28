@@ -2,6 +2,7 @@ data/
 images/
 images__debug/
 epoch_images/
+pytorch_patternnet/
 wandb/
 models/
 
