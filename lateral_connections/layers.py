@@ -23,7 +23,8 @@ from .torch_utils import *
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128):
+        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128,
+        random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
         
@@ -33,6 +34,11 @@ class LaterallyConnectedLayer(nn.Module):
         self.iterations_trained = 0
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Ablation study variants
+        self.random_k_change = random_k_change
+        self.random_multiplex_selection = random_multiplex_selection
+        self.gradient_learn_k = gradient_learn_k
 
         self.register_parameter('n', nn.Parameter(torch.Tensor([n]).to(torch.int), requires_grad=False))
         self.register_parameter('d', nn.Parameter(torch.Tensor([d]).to(torch.int), requires_grad=False))
@@ -145,16 +151,22 @@ class LaterallyConnectedLayer(nn.Module):
             self.L = softmax_minmax_scaled(self.L)
             del padded_A
 
-            # Calculate A_hat, perform convolution (L) and add to intial input
-            # find the maximum multiplex cells for each multiple (n)
-            A_max = torch.sum((1 - self.iota) * self.A + self.iota * self.L, dim=(-2,-1))
-            A_max = A_max.reshape((A_max.shape[0], self.n, A_max.shape[1]//self.n))
-            A_max = torch.argmax(torch.transpose(A_max,2,1), dim=-1)
+            if self.random_multiplex_selection:
+                # Do the selection of multiplex cells randomly
+                A_max = torch.rand((self.A.shape[0], self.n, self.A.shape[1]//self.n)).to(self.device)
+                A_max = torch.argmax(torch.transpose(A_max,2,1), dim=-1)
+
+            else:
+                # Calculate A_hat, perform convolution (L) and add to intial input
+                # find the maximum multiplex cells for each multiple (n)
+                A_max = torch.sum((1 - self.iota) * self.A + self.iota * self.L, dim=(-2,-1))
+                A_max = A_max.reshape((A_max.shape[0], self.n, A_max.shape[1]//self.n))
+                A_max = torch.argmax(torch.transpose(A_max,2,1), dim=-1)
 
             # Get the argmax indices inside the multiplex cells for each sample in the batch
             fm_indices = A_max.shape[1] * A_max + torch.arange(0, A_max.shape[1]).to(self.device)
-            filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(self.A, fm_indices)])
             del A_max
+            filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(self.A, fm_indices)])
 
             k_indices = torch.repeat_interleave(fm_indices.unsqueeze(-1), fm_indices.shape[1], dim=2)
 
@@ -167,55 +179,59 @@ class LaterallyConnectedLayer(nn.Module):
             del cnts
 
             if self.training:
-                # Lateral Connection Reinforcement
-                K_change = torch.zeros(size=self.K.shape, device=self.device)
+                if self.random_k_change:
+                    K_change = torch.rand(size=self.K.shape, device=self.device)
 
-                # Iterate through the different necessary shifts between the feature maps
-                # to account for all positions in the kernel K
-                #
-                for x in range(self.K.shape[-2]):
-                    for y in range(self.K.shape[-1]):
-                        # source and target feature maps are transposed to enable broadcasting across
-                        # the batch size dimension
-                        #
-                        xoff_f = - self.d + x
-                        yoff_f = - self.d + y
-                        source_fms = self.A[:, :, max(0,xoff_f):self.A.shape[-2]+min(xoff_f,0), max(0,yoff_f):self.A.shape[-1]+min(0,yoff_f)]
-                        source_fms = source_fms.transpose(0,1)
+                else:
+                    # Lateral Connection Reinforcement
+                    K_change = torch.zeros(size=self.K.shape, device=self.device)
 
-                        xoff_i = self.d - x
-                        yoff_i = self.d - y
-                        target_fms = self.A[:, :, max(0,xoff_i):self.A.shape[-2]+min(xoff_i,0), max(0,yoff_i):self.A.shape[-1]+min(0,yoff_i)]
-                        target_fms = target_fms.transpose(0,1).unsqueeze(1)
-
-                        # calculate the product of all feature maps (source) together with the
-                        # to-be-influenced feature map (target) efficiently
-                        #
-                        # Initially, self.A contains [batch_size, num_fm, fm_height, fm_width] dimensions
-                        #
-                        # Designations of einsum characters:
-                        #   a:  Extra dim to ensure each FM in target is multipled with the whole source blob
-                        #   b:  Feature Map #
-                        #   c:  Batch (see the transpose(0,1) calls)
-                        #   d:  Feature Map Height
-                        #   e:  Feature Map Width
-                        #
-                        tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
-                        
-                        # inhibit inactive multiplex cell changes
-                        #
-                        for b in range(batch_size):
-                            # lehl@2022-04-18: Only source and target feature maps that are active
-                            # should be changed/influenced by the changes calculated here
+                    # Iterate through the different necessary shifts between the feature maps
+                    # to account for all positions in the kernel K
+                    #
+                    for x in range(self.K.shape[-2]):
+                        for y in range(self.K.shape[-1]):
+                            # source and target feature maps are transposed to enable broadcasting across
+                            # the batch size dimension
                             #
-                            tmp[b, inactive_multiplex_idx[b,:], :] = 0
-                            tmp[b, :, inactive_multiplex_idx[b,:]] = 0
+                            xoff_f = - self.d + x
+                            yoff_f = - self.d + y
+                            source_fms = self.A[:, :, max(0,xoff_f):self.A.shape[-2]+min(xoff_f,0), max(0,yoff_f):self.A.shape[-1]+min(0,yoff_f)]
+                            source_fms = source_fms.transpose(0,1)
 
-                        # Average across the batch size
-                        #
-                        number_of_samples_per_pixel = torch.count_nonzero(tmp, dim=0)
-                        number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
-                        K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
+                            xoff_i = self.d - x
+                            yoff_i = self.d - y
+                            target_fms = self.A[:, :, max(0,xoff_i):self.A.shape[-2]+min(xoff_i,0), max(0,yoff_i):self.A.shape[-1]+min(0,yoff_i)]
+                            target_fms = target_fms.transpose(0,1).unsqueeze(1)
+
+                            # calculate the product of all feature maps (source) together with the
+                            # to-be-influenced feature map (target) efficiently
+                            #
+                            # Initially, self.A contains [batch_size, num_fm, fm_height, fm_width] dimensions
+                            #
+                            # Designations of einsum characters:
+                            #   a:  Extra dim to ensure each FM in target is multipled with the whole source blob
+                            #   b:  Feature Map #
+                            #   c:  Batch (see the transpose(0,1) calls)
+                            #   d:  Feature Map Height
+                            #   e:  Feature Map Width
+                            #
+                            tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
+                            
+                            # inhibit inactive multiplex cell changes
+                            #
+                            for b in range(batch_size):
+                                # lehl@2022-04-18: Only source and target feature maps that are active
+                                # should be changed/influenced by the changes calculated here
+                                #
+                                tmp[b, inactive_multiplex_idx[b,:], :] = 0
+                                tmp[b, :, inactive_multiplex_idx[b,:]] = 0
+
+                            # Average across the batch size
+                            #
+                            number_of_samples_per_pixel = torch.count_nonzero(tmp, dim=0)
+                            number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
+                            K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
 
                 K_change = minmax_on_fm(K_change)
                 

@@ -35,7 +35,11 @@ def main(args):
         'lcl_k': 2*args.lcl_distance+1,
         'mnistc_corruption': 'gaussian_noise',
         'model_path': args.model_path,
-        'after_pooling': args.after_pooling
+        'after_pooling': args.after_pooling,
+
+        'random_k_change': args.random_k_change,
+        'random_multiplex_selection': args.random_multiplex_selection,
+        'gradient_learn_k': args.gradient_learn_k,
     }
 
     train_network(config)
@@ -43,13 +47,23 @@ def main(args):
 def train_network(config):
     base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
     wandb_run_name = base_name + '_LCL' + str(args.after_pooling) + '_d' + str(args.lcl_distance)
+    wandb_group_name = 'Vgg19_Reconstructed'
+
+    if config['random_k_change']:
+        wandb_group_name += '__random_K_change'
+
+    elif config['random_multiplex_selection']:
+        wandb_group_name += '__random_multiplex_selection'
+
+    elif config['gradient_learn_k']:
+        wandb_group_name += '__gradient_learned_K'
 
     if DO_WANDB:
         wandb.login(key='efd0a05b7bd26ed445bf073625a373b845fc9385')
         wandb.init(
             project='MT_LateralConnections',
             entity='lehl',
-            group='Vgg19_Reconstructed_ZeroPad',
+            group=wandb_group_name,
             # group='debug',
             name=wandb_run_name,
             config=config
@@ -60,7 +74,10 @@ def train_network(config):
 
     model = VGGReconstructionLCL(vgg, learning_rate=config['learning_rate'], after_pooling=config['after_pooling'],
         num_multiplex=config['num_multiplex'], run_identifier=wandb_run_name, lcl_distance=config['lcl_distance'],
-        lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
+        lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'],
+        random_k_change=config['random_k_change'],
+        random_multiplex_selection=config['random_multiplex_selection'],
+        gradient_learn_k=config['gradient_learn_k'])
     # import code; code.interact(local=dict(globals(), **locals()))
     del vgg
 
@@ -90,8 +107,15 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, default='models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt', help='Vgg19 pretrained model to use')
     parser.add_argument('--after_pooling', type=int, default=3, help='after which pooling block the LCL is placed (1-5)')
 
+    parser.add_argument('--num_runs', type=int, default=1, help='Number of models to train')
+    parser.add_argument('--random_k_change', default=False, action='store_true', help='Ablation study: use random values for K_change')
+    parser.add_argument('--random_multiplex_selection', default=False, action='store_true', help='Ablation study: choose multiplex cells randomly')
+    parser.add_argument('--gradient_learn_k', default=False, action='store_true', help='Ablation study: do not use hebbian learning but regular gradients to learn the LCL kernel')
+
     args = parser.parse_args()
-    main(args)
+
     # import code; code.interact(local=dict(globals(), **locals()))
+    for _ in range(args.num_runs):
+        main(args)
 
 
