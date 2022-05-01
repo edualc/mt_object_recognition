@@ -94,7 +94,7 @@ def train_network(config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lr', type=float, default=3e-4, help='Learning rate of VGG19\'s optimizer')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate of VGG19\'s optimizer')
     parser.add_argument('--num_multiplex', type=int, default=4, help='Number of multiplex cells in LCL layers')
     parser.add_argument('--batch_size', type=int, default=10, help='Batch size')
     parser.add_argument('--num_epochs', type=int, default=5, help='Number of epochs trained')
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     parser.add_argument('--lcl_iota', type=float, default=0.2, help='Rate at which the argmax((1-iota)*A+iota*L) is calculated to determine active multiplex cells')
     # WandB: https://wandb.ai/lehl/MT_LateralConnections/runs/1d4yqrn9?workspace=user-lehl
     parser.add_argument('--model_path', type=str, default='models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt', help='Vgg19 pretrained model to use')
-    parser.add_argument('--after_pooling', type=int, default=3, help='after which pooling block the LCL is placed (1-5)')
+    parser.add_argument('--after_pooling', type=int, default=5, help='after which pooling block the LCL is placed (1-5)')
 
     parser.add_argument('--num_runs', type=int, default=1, help='Number of models to train')
     parser.add_argument('--random_k_change', default=False, action='store_true', help='Ablation study: use random values for K_change')
