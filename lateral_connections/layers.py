@@ -24,7 +24,7 @@ from .torch_utils import *
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
         alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128,
-        random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
+        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
         

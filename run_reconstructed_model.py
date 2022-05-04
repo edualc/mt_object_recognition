@@ -50,7 +50,10 @@ def train_network(config):
     wandb_run_name = base_name + '_LCL' + str(args.after_pooling) + '_d' + str(args.lcl_distance)
     wandb_group_name = 'Vgg19_Reconstructed'
 
-    if config['random_k_change']:
+    if config['use_scaling']:
+        wandb_group_name += '__use_scaling'
+
+    elif config['random_k_change']:
         wandb_group_name += '__random_K_change'
 
     elif config['random_multiplex_selection']:
@@ -61,6 +64,7 @@ def train_network(config):
 
     elif config['fc_only']:
         wandb_group_name += '__fc_only'
+
 
     if DO_WANDB:
         wandb.login(key='efd0a05b7bd26ed445bf073625a373b845fc9385')
@@ -112,6 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, default='models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt', help='Vgg19 pretrained model to use')
     parser.add_argument('--after_pooling', type=int, default=5, help='after which pooling block the LCL is placed (1-5)')
 
+    parser.add_argument('--use_scaling', default=False, action='store_true', help='Whether ')
     parser.add_argument('--num_runs', type=int, default=1, help='Number of models to train')
     parser.add_argument('--random_k_change', default=False, action='store_true', help='Ablation study: use random values for K_change')
     parser.add_argument('--random_multiplex_selection', default=False, action='store_true', help='Ablation study: choose multiplex cells randomly')
