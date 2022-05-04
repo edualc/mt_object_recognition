@@ -40,6 +40,7 @@ def main(args):
         'random_k_change': args.random_k_change,
         'random_multiplex_selection': args.random_multiplex_selection,
         'gradient_learn_k': args.gradient_learn_k,
+        'fc_only': args.fc_only,
     }
 
     train_network(config)
@@ -57,6 +58,9 @@ def train_network(config):
 
     elif config['gradient_learn_k']:
         wandb_group_name += '__gradient_learned_K'
+
+    elif config['fc_only']
+        wandb_group_name += '__fc_only'
 
     if DO_WANDB:
         wandb.login(key='efd0a05b7bd26ed445bf073625a373b845fc9385')
@@ -77,7 +81,8 @@ def train_network(config):
         lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'],
         random_k_change=config['random_k_change'],
         random_multiplex_selection=config['random_multiplex_selection'],
-        gradient_learn_k=config['gradient_learn_k'])
+        gradient_learn_k=config['gradient_learn_k'],
+        fc_only=config['fc_only'])
     # import code; code.interact(local=dict(globals(), **locals()))
     del vgg
 
@@ -111,6 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--random_k_change', default=False, action='store_true', help='Ablation study: use random values for K_change')
     parser.add_argument('--random_multiplex_selection', default=False, action='store_true', help='Ablation study: choose multiplex cells randomly')
     parser.add_argument('--gradient_learn_k', default=False, action='store_true', help='Ablation study: do not use hebbian learning but regular gradients to learn the LCL kernel')
+    parser.add_argument('--fc_only', default=False, action='store_true', help='Ablation study: reconstruct VGG19 without LCL, only add new fully connected layer')
 
     args = parser.parse_args()
 

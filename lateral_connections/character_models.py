@@ -270,7 +270,7 @@ class SmallVggWithLCL(VggWithLCL):
 class VGGReconstructionLCL(nn.Module):
     def __init__(self, vgg, after_pooling=3, learning_rate=3e-4, num_multiplex=4, run_identifier="",
         lcl_distance=2, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2,
-        random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
+        random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False, fc_only=False):
 
         super(VGGReconstructionLCL, self).__init__()
 
@@ -294,6 +294,7 @@ class VGGReconstructionLCL(nn.Module):
         self.random_k_change = random_k_change
         self.random_multiplex_selection = random_multiplex_selection
         self.gradient_learn_k = gradient_learn_k
+        self.fc_only = fc_only
 
         self._reconstruct_from_vgg()
 
@@ -372,22 +373,37 @@ class VGGReconstructionLCL(nn.Module):
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
                     random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
 
-        self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit), ('lcl', lcl_layer) ]) )
+        if self.fc_only:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4) + list(self.vgg.features.pool5)))
+            self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit) ]) )
+        else:
+            self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit), ('lcl', lcl_layer) ]) )
 
         # Freeze the params of the previous layers of VGG19
         #
         for param in self.features.vgg19_unit.parameters():
             param.requires_grad = False
 
-        fc_layer_input_size = fc_input_size(self.after_pooling)
-        fc_layer_output_size = fc_size(self.after_pooling)
-        nH, nW, _ = sizes_for_pooling_layer(self.after_pooling)
-        self.maxpool = nn.AdaptiveMaxPool2d((nH, nW))
-        self.classifier = nn.Sequential(
-            nn.Linear(fc_layer_input_size, fc_layer_output_size),
-            nn.ReLU(True),
-            nn.Linear(fc_layer_output_size, self.num_classes)
-        )
+        if self.fc_only:
+            self.maxpool = nn.AdaptiveMaxPool2d((7, 7))
+            self.classifier = nn.Sequential(
+                nn.Linear(512*7*7, 4096),
+                nn.ReLU(True),
+                nn.Linear(4096, 4096),
+                nn.ReLU(True),
+                nn.Linear(4096, self.num_classes)
+            )
+
+        else:
+            fc_layer_input_size = fc_input_size(self.after_pooling)
+            fc_layer_output_size = fc_size(self.after_pooling)
+            nH, nW, _ = sizes_for_pooling_layer(self.after_pooling)
+            self.maxpool = nn.AdaptiveMaxPool2d((nH, nW))
+            self.classifier = nn.Sequential(
+                nn.Linear(fc_layer_input_size, fc_layer_output_size),
+                nn.ReLU(True),
+                nn.Linear(fc_layer_output_size, self.num_classes)
+            )
 
         # Delete the pretrained "full" VGG19, since we're only
         # interested in using it a pretraining for earlier layers
