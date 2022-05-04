@@ -28,11 +28,11 @@ mnist_c_variants = [
 
 def check_mnist_c(identifier):
     models = [
-        ('vgg19r__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_173059_LCL5_d2__it23750_e4.pt'),
-        ('vgg19r__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_110019_LCL5_d2__it22500_e4.pt'), 
-        ('vgg19r__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_015249_LCL5_d2__it21250_e4.pt'), 
-        ('vgg19r__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_155859_LCL5_d2__it13750_e2.pt'),
-        ('vgg19r__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_063619_LCL5_d2__it8750_e1.pt'),
+        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_173059_LCL5_d2__it23750_e4.pt'),
+        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_110019_LCL5_d2__it22500_e4.pt'), 
+        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_015249_LCL5_d2__it21250_e4.pt'), 
+        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_155859_LCL5_d2__it13750_e2.pt'),
+        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_063619_LCL5_d2__it8750_e1.pt'),
         ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-03_085313_LCL5_d2__it16250_e3.pt'),
         ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-03_021853_LCL5_d2__it15000_e3.pt'),
         ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_194431_LCL5_d2__it13750_e2.pt'),

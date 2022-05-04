@@ -128,13 +128,13 @@ MODEL_CLASS = {
 
 def get_config_by_key(model_key):
     if model_key not in CONFIGS.keys():
-        raise ArgumentError(':model_key not found, available models: ', CONFIGS.keys())
+        raise ValueError(':model_key not found, available models: ', CONFIGS.keys())
 
     return CONFIGS[model_key]
 
 def load_model_by_key(model_key, model_path=None, config=None):
     if model_key not in CONFIGS.keys():
-        raise ArgumentError(':model_key not found, available models: ', CONFIGS.keys())
+        raise ValueError(':model_key not found, available models: ', CONFIGS.keys())
 
     if config is None:
         config = CONFIGS[model_key]
