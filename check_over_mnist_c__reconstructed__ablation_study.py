@@ -53,7 +53,7 @@ def check_mnist_c(identifier):
             print(f"{model_file.ljust(45)}\t{variant.ljust(20)}\t{round(c_acc,4)}")
             data.append({
                 'model': model_file,
-                'model_key': model_key
+                'model_key': model_key,
                 'mnist_c_variant': variant,
                 'accuracy': c_acc
             })
