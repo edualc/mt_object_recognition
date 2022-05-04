@@ -51,6 +51,7 @@ def check_mnist_c(identifier):
             loader = torch.utils.data.DataLoader(dataset, batch_size=config['batch_size'], shuffle=False, num_workers=1)
             c_acc, c_loss = model.test(loader)
 
+            model_file = model_path.split('/')[-1]
             print(f"{model_file.ljust(45)}\t{variant.ljust(20)}\t{round(c_acc,4)}")
             data.append({
                 'model': model_file,
