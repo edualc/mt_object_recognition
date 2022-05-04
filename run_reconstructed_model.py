@@ -59,7 +59,7 @@ def train_network(config):
     elif config['gradient_learn_k']:
         wandb_group_name += '__gradient_learned_K'
 
-    elif config['fc_only']
+    elif config['fc_only']:
         wandb_group_name += '__fc_only'
 
     if DO_WANDB:
