@@ -43,7 +43,7 @@ def check_mnist_c(identifier):
     data = []
 
     for model_key, model_path in tqdm(models, desc='Models'):
-        load_model_by_key(model_key, model_path=model_path)
+        model = load_model_by_key(model_key, model_path=model_path)
         config = get_config_by_key(model_key)
 
         for variant in tqdm(mnist_c_variants, desc='MNIST-C Variants', leave=False):
