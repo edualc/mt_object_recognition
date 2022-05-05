@@ -28,16 +28,22 @@ mnist_c_variants = [
 
 def check_mnist_c(identifier):
     models = [
-        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_173059_LCL5_d2__it23750_e4.pt'),
-        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_110019_LCL5_d2__it22500_e4.pt'), 
-        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_015249_LCL5_d2__it21250_e4.pt'), 
-        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_155859_LCL5_d2__it13750_e2.pt'),
-        ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_063619_LCL5_d2__it8750_e1.pt'),
-        ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-03_085313_LCL5_d2__it16250_e3.pt'),
-        ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-03_021853_LCL5_d2__it15000_e3.pt'),
-        ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_194431_LCL5_d2__it13750_e2.pt'),
-        ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_131013_LCL5_d2__it17500_e3.pt'),
-        ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_063619_LCL5_d2__it10000_e2.pt'),
+        # ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_173059_LCL5_d2__it23750_e4.pt'),
+        # ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_110019_LCL5_d2__it22500_e4.pt'), 
+        # ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-03_015249_LCL5_d2__it21250_e4.pt'), 
+        # ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_155859_LCL5_d2__it13750_e2.pt'),
+        # ('vgg19r_lcl__random_k_change', 'models/vgg_reconstructed_lcl/2022-05-02_063619_LCL5_d2__it8750_e1.pt'),
+        # ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-03_085313_LCL5_d2__it16250_e3.pt'),
+        # ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-03_021853_LCL5_d2__it15000_e3.pt'),
+        # ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_194431_LCL5_d2__it13750_e2.pt'),
+        # ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_131013_LCL5_d2__it17500_e3.pt'),
+        # ('vgg19r_lcl__random_multiplex_selection', 'models/vgg_reconstructed_lcl/2022-05-02_063619_LCL5_d2__it10000_e2.pt'),
+
+        ('vgg19r_lcl__fc_only', 'models/vgg_reconstructed_lcl/2022-05-04_111224_LCL5_d2__it23750_e4.pt'),
+        ('vgg19r_lcl__fc_only', 'models/vgg_reconstructed_lcl/2022-05-04_104338_LCL5_d2__it23750_e4.pt'),
+        ('vgg19r_lcl__fc_only', 'models/vgg_reconstructed_lcl/2022-05-04_101450_LCL5_d2__it23750_e4.pt'),
+        ('vgg19r_lcl__fc_only', 'models/vgg_reconstructed_lcl/2022-05-04_094600_LCL5_d2__it23750_e4.pt'),
+        ('vgg19r_lcl__fc_only', 'models/vgg_reconstructed_lcl/2022-05-04_091715_LCL5_d2__it23750_e4.pt'),
     ]
 
     data = []
@@ -67,7 +73,7 @@ def check_mnist_c(identifier):
     df.to_csv('mnist_c__' + identifier + '.csv')
 
 def main():
-    check_mnist_c('vgg19r_lcl__ablation_study')
+    check_mnist_c('vgg19r_lcl__ablation_study2')
 
 if __name__ == '__main__':
     main()
