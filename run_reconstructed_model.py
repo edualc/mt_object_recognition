@@ -42,6 +42,8 @@ def main(args):
         'random_multiplex_selection': args.random_multiplex_selection,
         'gradient_learn_k': args.gradient_learn_k,
         'fc_only': args.fc_only,
+
+        'no_pretrained_vgg': args.no_pretrained_vgg,
     }
 
     train_network(config)
@@ -66,6 +68,9 @@ def train_network(config):
     elif config['fc_only']:
         wandb_group_name += '__fc_only__AvgPool'
 
+    elif config['no_pretrained_vgg']:
+        wandb_group_name += '__no_pretrained_vgg'
+
 
     if DO_WANDB:
         wandb.login(key='efd0a05b7bd26ed445bf073625a373b845fc9385')
@@ -79,7 +84,8 @@ def train_network(config):
         )
 
     vgg = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=0.2)
-    vgg.load(config['model_path'])
+    if not config['no_pretrained_vgg']:
+        vgg.load(config['model_path'])
 
     model = VGGReconstructionLCL(vgg, learning_rate=config['learning_rate'], after_pooling=config['after_pooling'],
         num_multiplex=config['num_multiplex'], run_identifier=wandb_run_name, lcl_distance=config['lcl_distance'],
@@ -87,7 +93,8 @@ def train_network(config):
         random_k_change=config['random_k_change'],
         random_multiplex_selection=config['random_multiplex_selection'],
         gradient_learn_k=config['gradient_learn_k'],
-        fc_only=config['fc_only'])
+        fc_only=config['fc_only'],
+        freeze_vgg=(not config['no_pretrained_vgg']))
     # import code; code.interact(local=dict(globals(), **locals()))
     del vgg
 
@@ -123,6 +130,8 @@ if __name__ == '__main__':
     parser.add_argument('--random_multiplex_selection', default=False, action='store_true', help='Ablation study: choose multiplex cells randomly')
     parser.add_argument('--gradient_learn_k', default=False, action='store_true', help='Ablation study: do not use hebbian learning but regular gradients to learn the LCL kernel')
     parser.add_argument('--fc_only', default=False, action='store_true', help='Ablation study: reconstruct VGG19 without LCL, only add new fully connected layer')
+
+    parser.add_argument('--no_pretrained_vgg', default=False, action='store_true', help='Whether the pre-trained VGG should be used as a starting point')
 
     args = parser.parse_args()
 

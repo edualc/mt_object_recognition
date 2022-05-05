@@ -270,7 +270,7 @@ class SmallVggWithLCL(VggWithLCL):
 class VGGReconstructionLCL(nn.Module):
     def __init__(self, vgg, after_pooling=3, learning_rate=3e-4, num_multiplex=4, run_identifier="",
         lcl_distance=2, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2,
-        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False, fc_only=False):
+        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False, fc_only=False, freeze_vgg=True):
 
         super(VGGReconstructionLCL, self).__init__()
 
@@ -290,6 +290,7 @@ class VGGReconstructionLCL(nn.Module):
         self.lcl_eta = lcl_eta
         self.lcl_iota = lcl_iota
 
+        self.freeze_vgg = freeze_vgg
         self.use_scaling = use_scaling
 
         # Ablation study variants
@@ -297,6 +298,7 @@ class VGGReconstructionLCL(nn.Module):
         self.random_multiplex_selection = random_multiplex_selection
         self.gradient_learn_k = gradient_learn_k
         self.fc_only = fc_only
+
 
         self._reconstruct_from_vgg()
 
@@ -383,8 +385,9 @@ class VGGReconstructionLCL(nn.Module):
 
         # Freeze the params of the previous layers of VGG19
         #
-        for param in self.features.vgg19_unit.parameters():
-            param.requires_grad = False
+        if self.freeze_vgg:
+            for param in self.features.vgg19_unit.parameters():
+                param.requires_grad = False
 
         if self.fc_only:
             self.maxpool = nn.AdaptiveAvgPool2d((7, 7))
