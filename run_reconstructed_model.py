@@ -37,6 +37,7 @@ def main(args):
         'model_path': args.model_path,
         'after_pooling': args.after_pooling,
 
+        'use_scaling': args.use_scaling,
         'random_k_change': args.random_k_change,
         'random_multiplex_selection': args.random_multiplex_selection,
         'gradient_learn_k': args.gradient_learn_k,
