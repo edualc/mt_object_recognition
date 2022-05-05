@@ -387,7 +387,7 @@ class VGGReconstructionLCL(nn.Module):
             param.requires_grad = False
 
         if self.fc_only:
-            self.maxpool = nn.AdaptiveMaxPool2d((7, 7))
+            self.maxpool = nn.AdaptiveAvgPool2d((7, 7))
             self.classifier = nn.Sequential(
                 nn.Linear(512*7*7, 4096),
                 nn.ReLU(True),

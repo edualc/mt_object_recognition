@@ -64,7 +64,7 @@ def train_network(config):
         wandb_group_name += '__gradient_learned_K'
 
     elif config['fc_only']:
-        wandb_group_name += '__fc_only'
+        wandb_group_name += '__fc_only__AvgPool'
 
 
     if DO_WANDB:
