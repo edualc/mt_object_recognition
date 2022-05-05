@@ -73,7 +73,7 @@ def check_mnist_c(identifier):
     df.to_csv('mnist_c__' + identifier + '.csv')
 
 def main():
-    check_mnist_c('vgg19r_lcl__ablation_study2')
+    check_mnist_c('vgg19r_lcl__ablation_study__fc_only')
 
 if __name__ == '__main__':
     main()
