@@ -23,7 +23,7 @@ from .torch_utils import *
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128,
+        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128, num_noisy_iterations=1000,
         use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
@@ -32,6 +32,7 @@ class LaterallyConnectedLayer(nn.Module):
         # by model.eval() / model.train(), to control whether updates should be done
         self.training = update
         self.iterations_trained = 0
+        self.num_noisy_iterations = num_noisy_iterations
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -65,9 +66,13 @@ class LaterallyConnectedLayer(nn.Module):
 
         # lehl@2022-02-10: Applying softmax helps to keep these values somewhat bounded and to
         # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
-        K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
+        K = torch.zeros((self.n*self.num_fm, self.n*self.num_fm, self.k, self.k))
+        #K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
         self.register_parameter('K', torch.nn.Parameter(K, requires_grad=False))
         del K
+
+        # To keep track of which ones are selected
+        self.current_k_indices = None
 
         self.L = None
         self.O = None
@@ -137,21 +142,35 @@ class LaterallyConnectedLayer(nn.Module):
             self.A = A.repeat(1, self.n, 1, 1)
 
             if self.training:
-                # Add noise to help break the symmetry between initially
-                # identical multiplex cells
+                # lehl@2022-05-11: Turns out that noise makes the multiplex cells not specialize
+                # enough and should --- after some initial training --- be turned off
                 #
-                noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.device)
-                self.A = torch.clip(self.A + self.eta * noise, min=0.0)
+                if self.iterations_trained < self.num_noisy_iterations:
+                    noise_multiplier = 1
+
+                    # Gradually remove the noise over time
+                    #
+                    if self.iterations_trained > self.num_noisy_iterations // 2:
+                        noise_multiplier = (self.num_noisy_iterations - self.iterations_trained) / (self.num_noisy_iterations // 2)
+
+                    # Add noise to help break the symmetry between initially
+                    # identical multiplex cells
+                    #
+                    noise = torch.normal(torch.zeros(self.A.shape), torch.ones(self.A.shape)).to(self.device)
+                    self.A = torch.clip(self.A + self.eta * noise * noise_multiplier, min=0.0)
 
             # generate padded A for convolution
             padded_A = self.pad_activations(self.A)
             
             # Calculate initial lateral connections
             self.L = F.conv2d(padded_A, minmax_on_fm(self.K.transpose_(0, 1)), padding=0) / self.num_fm
-            self.L = softmax_minmax_scaled(self.L)
+
+            # lehl@2022-05-10: Changing normalization, trying out best N% instead
+            #self.L = softmax_minmax_scaled(self.L)
+            self.L = minmax_on_fm(self.L)
             del padded_A
 
-            if self.random_multiplex_selection:
+            if self.random_multiplex_selection or self.iterations_trained < self.num_noisy_iterations:
                 # Do the selection of multiplex cells randomly
                 A_max = torch.rand((self.A.shape[0], self.n, self.A.shape[1]//self.n)).to(self.device)
                 A_max = torch.argmax(torch.transpose(A_max,2,1), dim=-1)
@@ -169,6 +188,7 @@ class LaterallyConnectedLayer(nn.Module):
             filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(self.A, fm_indices)])
 
             k_indices = torch.repeat_interleave(fm_indices.unsqueeze(-1), fm_indices.shape[1], dim=2)
+            self.current_k_indices = torch.clone(k_indices)
 
             # Build idx of disabled multiplex cells
             inactive_multiplex_idx = torch.zeros((batch_size, self.A.shape[1] - fm_indices.shape[1]), device=self.device).to(torch.long)
@@ -217,7 +237,7 @@ class LaterallyConnectedLayer(nn.Module):
                             #   e:  Feature Map Width
                             #
                             tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
-                            
+
                             # inhibit inactive multiplex cell changes
                             #
                             for b in range(batch_size):
@@ -233,7 +253,7 @@ class LaterallyConnectedLayer(nn.Module):
                             number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
                             K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
 
-                K_change = minmax_on_fm(K_change)
+                #K_change = minmax_on_fm(K_change)
                 
                 # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
                 # that we have no over- or underflows over time. 

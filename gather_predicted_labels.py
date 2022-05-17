@@ -129,7 +129,9 @@ def check_mnist_c(identifier, variant):
     df.to_csv('mnist_c__' + variant + '__' + identifier + '__predictions.csv', index=False)
 
 def main():
-    check_mnist_c('vgg19r_lcl5', 'identity')
+    # check_mnist_c('vgg19r_lcl5', 'gaussian_noise')
+    check_mnist_c('vggonly', 'gaussian_noise')
+    # check_mnist_c('vgg19r_lcl5', 'identity')
     # check_mnist_c('vgg19r_lcl5', 'line')
 
 
