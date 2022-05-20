@@ -67,7 +67,8 @@ def train_network(config):
             group='Vgg19WithLCL_eval2' if config['use_lcl'] else 'Vgg19_eval',
             # group='debug',
             name=wandb_run_name,
-            config=config
+            config=config,
+            # mode='disabled',
         )
 
     model = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'],

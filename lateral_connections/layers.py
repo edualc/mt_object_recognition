@@ -23,7 +23,7 @@ from .torch_utils import *
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.1, beta=0.01, gamma=0.01, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128, num_noisy_iterations=1000,
+        alpha=0.1, beta=0.001, gamma=0.001, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128, num_noisy_iterations=1000,
         use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
@@ -35,6 +35,8 @@ class LaterallyConnectedLayer(nn.Module):
         self.num_noisy_iterations = num_noisy_iterations
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.use_scaling = use_scaling
 
         # Ablation study variants
         self.random_k_change = random_k_change
@@ -141,6 +143,20 @@ class LaterallyConnectedLayer(nn.Module):
             #
             self.A = A.repeat(1, self.n, 1, 1)
 
+
+
+
+            # if self.use_scaling:
+            #     # Calculate the activation strength of each feature map
+            #     #
+            #     activation_strength = torch.mean(torch.sum(self.A, dim=(-2,-1)), dim=0) / (self.A.shape[-1] * self.A.shape[2])
+
+            #     l = F.conv2d(self.pad_activations(self.A), minmax_on_fm(self.K.transpose_(0,1)), padding=0)/ (self.A.shape[-1] * self.A.shape[2] * self.num_fm)
+            # import code; code.interact(local=dict(globals(), **locals()))
+
+
+
+
             if self.training:
                 # lehl@2022-05-11: Turns out that noise makes the multiplex cells not specialize
                 # enough and should --- after some initial training --- be turned off
@@ -163,7 +179,7 @@ class LaterallyConnectedLayer(nn.Module):
             padded_A = self.pad_activations(self.A)
             
             # Calculate initial lateral connections
-            self.L = F.conv2d(padded_A, minmax_on_fm(self.K.transpose_(0, 1)), padding=0) / self.num_fm
+            self.L = F.conv2d(padded_A, minmax_on_fm(self.K.transpose(0, 1)), padding=0) / self.num_fm
 
             # lehl@2022-05-10: Changing normalization, trying out best N% instead
             #self.L = softmax_minmax_scaled(self.L)
@@ -253,7 +269,7 @@ class LaterallyConnectedLayer(nn.Module):
                             number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
                             K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
 
-                #K_change = minmax_on_fm(K_change)
+                K_change = minmax_on_fm(K_change)
                 
                 # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
                 # that we have no over- or underflows over time. 
@@ -299,4 +315,223 @@ class LaterallyConnectedLayer(nn.Module):
         # Keep track of number of training iterations
         self.iterations_trained += 1 if self.training else 0
 
-        return self.O
+        return filtered_L
+        # return self.O
+
+class LaterallyConnectedLayer2(LaterallyConnectedLayer):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        K = torch.zeros((self.num_fm, self.n, self.num_fm, self.n, self.k, self.k))
+        self.register_parameter('K', torch.nn.Parameter(K, requires_grad=False))
+        del K
+
+        self.register_parameter('mu', torch.nn.Parameter(torch.ones((self.num_fm, self.n, self.fm_height, self.fm_width)) / self.n, requires_grad=False))
+        self.register_parameter('S', torch.nn.Parameter(torch.ones(self.mu.shape), requires_grad=False))
+        self.register_parameter('M', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
+
+    # Reshape the given activation to the compact multiplex shape
+    # [b, fm, n, H, W] --> [b, fm*n, H, W]
+    #
+    def _activation_to_compact(self, A):
+        As = A.shape
+        return A.reshape((As[0], self.num_fm*self.n, As[3], As[4]))
+    
+    # Reshape the given activation to the extended multiplex shape
+    # [b, fm, n, H, W] <-- [b, fm*n, H, W]
+    #
+    def _activation_from_compact(self, A):
+        As = A.shape
+        return A.reshape((As[0], self.num_fm, self.n, As[-2], As[-1]))
+
+    # Reshape the kernel in the compact multiplex shape
+    # [fmS, nS, fmT, nT, kH, kW] --> [fmS*nS, fmT*nT, kH, kW]
+    #
+    # The kernel self.K is stored in the extended multiplex shape
+    #
+    def _kernel_to_compact(self, K):
+        Ks = K.shape
+        return K.reshape((self.num_fm*self.n, self.num_fm*self.n, Ks[4], Ks[5]))
+
+    # Reshape the kernel in the extended multiplex shape
+    # [fmS, nS, fmT, nT, kH, kW] <-- [fmS*nS, fmT*nT, kH, kW]
+    # 
+    def _kernel_from_compact(self, K):
+        Ks = K.shape
+        return K.reshape((self.num_fm, self.n, self.num_fm, self.n, Ks[-2], Ks[-1]))
+
+
+    def forward(self, A_input):
+        if self.disabled:
+            return torch.clone(A_input)
+
+        with torch.no_grad():
+            batch_size = A_input.shape[0]
+
+            # Enlarge input for multipelx cells
+            # --------------------------------------------------------------
+            #
+            # Turn [batch, feature_map, height, width]
+            # into [batch, feature_map, **multiplex_cell**, height, width]
+            #
+            A = A_input.unsqueeze(2).repeat(1,1,self.n,1,1)
+
+            # # # Feature map scaling
+            # # # --------------------------------------------------------------
+            # # #
+            # scaling_factor = self.S.unsqueeze(0)
+            # A *= scaling_factor
+
+            # Calculate lateral activity
+            # --------------------------------------------------------------
+            #
+            A_reshaped = self._activation_to_compact(A)
+            K_reshaped = self._kernel_to_compact(torch.clone(self.K)).transpose(0,1)
+
+            L = F.conv2d(A_reshaped, K_reshaped, padding=self.d.item())
+            L = self._activation_from_compact(L)
+
+            # Multiplex cell selection
+            # --------------------------------------------------------------
+            #
+            L_idx = torch.argmax(L, dim=2, keepdim=True)
+
+            Li = torch.argmax((1-self.iota)*A+self.iota*L, dim=2, keepdim=True)
+
+            # self.A ->     [4, 20, 14, 14]
+            # self.L ->     [4, 20, 14, 14]
+            # fm_indices ->     [4, 5]
+            # A_max ->      [4, 5]
+            # filtered_A ->     [4, 5, 14, 14]
+            #
+            A_max = torch.argmax(torch.sum((1-self.iota)*A+self.iota*L, dim=(-2,-1)), dim=-1)
+            fm_indices = A_max.shape[1] * A_max + torch.arange(0, A_max.shape[1]).to(self.device)
+            del A_max
+            # filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(A_reshaped, fm_indices)])
+
+            inactive_multiplex_idx = torch.zeros((batch_size, A_reshaped.shape[1] - fm_indices.shape[1]), device=self.device).to(torch.long)
+            for b in range(batch_size):
+                uniqs, cnts = torch.cat((torch.arange(A_reshaped.shape[1]).to(self.device), fm_indices[b,:])).unique(return_counts=True)
+                inactive_multiplex_idx[b,:] = uniqs[cnts==1]
+
+            # import code; code.interact(local=dict(globals(), **locals()))
+
+            # Binary mask of which multiplex cells are active (per FM/pixel)
+            multiplex_mask = torch.zeros(L.shape, device=self.device)
+            multiplex_mask.scatter_(dim=2, index=L_idx, src=torch.ones(L_idx.shape, device=self.device))
+
+            # Update Kernel
+            # --------------------------------------------------------------
+            #
+            # A_reshaped = self._activation_to_compact(A)
+            
+            if self.training:
+                K_change = torch.zeros(size=self._kernel_to_compact(self.K).shape, device=self.device)
+
+                # filter_mask = multiplex_mask.reshape((batch_size, self.num_fm*self.n, multiplex_mask.shape[-2], multiplex_mask.shape[-1]))
+                # A_filtered = A_reshaped * filter_mask
+
+                # Iterate through the different necessary shifts between the feature maps
+                # to account for all positions in the kernel K
+                #
+                for x in range(self.K.shape[-2]):
+                    for y in range(self.K.shape[-1]):
+                        # source and target feature maps are transposed to enable broadcasting across
+                        # the batch size dimension
+                        #
+                        xoff_f = - self.d + x
+                        yoff_f = - self.d + y
+                        source_fms = A_reshaped[:, :, max(0,xoff_f):A_reshaped.shape[-2]+min(xoff_f,0), max(0,yoff_f):A_reshaped.shape[-1]+min(0,yoff_f)]
+                        # source_fms = A_filtered[:, :, max(0,xoff_f):A_filtered.shape[-2]+min(xoff_f,0), max(0,yoff_f):A_filtered.shape[-1]+min(0,yoff_f)]
+                        source_fms = source_fms.transpose(0,1)
+
+                        xoff_i = self.d - x
+                        yoff_i = self.d - y
+                        target_fms = A_reshaped[:, :, max(0,xoff_i):A_reshaped.shape[-2]+min(xoff_i,0), max(0,yoff_i):A_reshaped.shape[-1]+min(0,yoff_i)]
+                        target_fms = target_fms.transpose(0,1).unsqueeze(1)
+
+                        # calculate the product of all feature maps (source) together with the
+                        # to-be-influenced feature map (target) efficiently
+                        #
+                        # Initially, self.A contains [batch_size, num_fm, fm_height, fm_width] dimensions
+                        #
+                        # Designations of einsum characters:
+                        #   a:  Extra dim to ensure each FM in target is multipled with the whole source blob
+                        #   b:  Feature Map #
+                        #   c:  Batch (see the transpose(0,1) calls)
+                        #   d:  Feature Map Height
+                        #   e:  Feature Map Width
+                        #
+                        tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
+
+                        # # inhibit inactive multiplex cell changes
+                        # #
+                        # # binary mask of which multiplex cells are active, needs to be replicated to
+                        # # incompass both source and target feature maps on the kernel change
+                        # #
+                        # # multiplex_mask: [batch, fms, multiplex]
+                        # # mask: [batch, fms*multiplex, fms*multiplex]
+                        # #
+                        # mask = multiplex_mask[:,:,:,0,0]
+                        # ms = mask.shape
+                        # mask = mask.reshape((ms[0],ms[1]*ms[2])).repeat(1,ms[1]*ms[2]).reshape((ms[0],ms[1]*ms[2],ms[1]*ms[2]))
+                        
+                        # tmp = tmp * mask
+
+
+                        # inhibit inactive multiplex cell changes
+                        #
+                        for b in range(batch_size):
+                            # lehl@2022-04-18: Only source and target feature maps that are active
+                            # should be changed/influenced by the changes calculated here
+                            #
+                            tmp[b, inactive_multiplex_idx[b,:], :] = 0
+                            tmp[b, :, inactive_multiplex_idx[b,:]] = 0
+
+                        # Average across the batch size
+                        #
+                        number_of_samples_per_pixel = torch.count_nonzero(tmp, dim=0)
+                        number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
+                        K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
+                        K_change[:, :, x, y] /= (tmp.shape[-1] * tmp.shape[-2])
+
+                # import code; code.interact(local=dict(globals(), **locals()))
+
+                self.K *= (1 - self.alpha)
+                self.K += self.alpha * self._kernel_from_compact(K_change)
+                del K_change
+
+                # Update Feature Map Scaling
+                # --------------------------------------------------------------
+                #
+                usage = torch.sum(multiplex_mask, dim=0) / multiplex_mask.shape[0]
+              
+                # import code; code.interact(local=dict(globals(), **locals()))
+                self.M *= (1 - self.beta)
+                self.M += self.beta * usage
+                self.S = nn.Parameter(torch.clip(self.S + self.gamma * (self.mu - self.M), min=0.5, max=2.0))
+                
+
+            if self.iterations_trained % 100 == 0:
+                np.set_printoptions(precision=2, suppress=True)
+                print("USAGE\n",torch.sum(multiplex_mask, dim=(0,-1,-2)).cpu().detach().numpy())
+                print("MEAN\n", torch.sum(self.M, dim=(-2,-1)).cpu().detach().numpy() / (14*14))
+                print("STRENGTH\n", torch.sum(self.S,dim=(-2,-1)).cpu().detach().numpy() / (14*14))
+            # import code; code.interact(local=dict(globals(), **locals()))
+
+        # Calculate output using only the active multiplex cells
+        # --------------------------------------------------------------
+        #
+        A_reshaped = self._activation_to_compact(A)
+
+        L = F.conv2d(A_reshaped, minmax_on_fm(self._kernel_to_compact(self.K).transpose(0,1)), padding=self.d.item())
+        L = self._activation_from_compact(L)
+        
+        self.iterations_trained += 1 if self.training else 0
+        # import code; code.interact(local=dict(globals(), **locals()))
+
+        output = torch.sum(L * multiplex_mask, dim=2)
+        return output
+
+

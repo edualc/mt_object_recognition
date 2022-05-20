@@ -168,6 +168,7 @@ class VggWithLCL(nn.Module):
                 if current_iteration > 0 and (current_iteration % 1250) == 0:
                     self.save(f"models/vgg_with_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
                     val_acc, val_loss = self.test(val_loader)
+                    self.train()
                     log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
 
                     if test_loader:
@@ -470,6 +471,7 @@ class VGGReconstructionLCL(nn.Module):
                 if current_iteration > 0 and (current_iteration % 1250) == 0:
                     self.save(f"models/vgg_reconstructed_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
                     val_acc, val_loss = self.test(val_loader)
+                    self.train()
                     log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
 
                     if test_loader:
@@ -607,6 +609,7 @@ class CharacterVgg():
 
             # Validation Loop
             val_acc, val_loss = self.test()
+            self.net.train()
 
             log_msg = ''.join([
                 "Epoch",       f"{epoch+1:2d}",                 "\t",

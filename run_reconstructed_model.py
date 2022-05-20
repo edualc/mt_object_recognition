@@ -80,7 +80,8 @@ def train_network(config):
             group=wandb_group_name,
             # group='debug',
             name=wandb_run_name,
-            config=config
+            config=config,
+            # mode='disabled',
         )
 
     vgg = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=0.2)

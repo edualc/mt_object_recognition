@@ -17,7 +17,7 @@ from lateral_connections import LateralModel, VggModel
 from lateral_connections import VggWithLCL
 from lateral_connections import MNISTCDataset
 from lateral_connections.loaders import get_loaders, load_mnistc
-from lateral_connections.layers import LaterallyConnectedLayer
+from lateral_connections.layers import LaterallyConnectedLayer, LaterallyConnectedLayer2
 from lateral_connections.torch_utils import *
 
 import wandb
@@ -35,8 +35,9 @@ config = {
     'lcl_eta': 0.1,
     'lcl_theta': 0.2,
     'lcl_iota': 0.2,
-    'lcl_distance': 3,
-    'conv_size': 2,
+    'lcl_distance': 1,
+    'conv_size': 5,
+    'use_scaling': True,
 }
 
 base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -50,7 +51,8 @@ wandb.init(
     #group=wandb_group_name,
     group='debug',
     name=wandb_run_name,
-    config=config
+    config=config,
+    mode='disabled',
 )
 
 def plot_kernels(model, plot_scale=3):
@@ -74,11 +76,21 @@ class TinyLateralNetwork(nn.Module):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.config = config
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=config['conv_size'], padding=1, kernel_size=(3,3))
-        self.relu1 = nn.ReLU()
-        self.conv2 = nn.Conv2d(in_channels=config['conv_size'], out_channels=config['conv_size'], padding=1, kernel_size=(3,3))
-        self.relu2 = nn.ReLU()
+        self.relu1 = nn.Sigmoid()
         self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
-        self.lcl = LaterallyConnectedLayer(self.config['num_multiplex'], config['conv_size'], 14, 14,
+        # self.lcl = LaterallyConnectedLayer(self.config['num_multiplex'], config['conv_size'], 14, 14,
+        #                       d=self.config['lcl_distance'],
+        #                       prd=self.config['lcl_distance'],
+        #                       disabled=False,
+        #                       alpha=self.config['lcl_alpha'],
+        #                       eta=self.config['lcl_eta'],
+        #                       theta=self.config['lcl_theta'],
+        #                       iota=self.config['lcl_iota'],
+        #                       use_scaling=config['use_scaling'],
+        #                       random_k_change=False,
+        #                       random_multiplex_selection=False,
+        #                       gradient_learn_k=False)
+        self.lcl = LaterallyConnectedLayer2(self.config['num_multiplex'], config['conv_size'], 14, 14,
                               d=self.config['lcl_distance'],
                               prd=self.config['lcl_distance'],
                               disabled=False,
@@ -86,7 +98,7 @@ class TinyLateralNetwork(nn.Module):
                               eta=self.config['lcl_eta'],
                               theta=self.config['lcl_theta'],
                               iota=self.config['lcl_iota'],
-                              use_scaling=False,
+                              use_scaling=config['use_scaling'],
                               random_k_change=False,
                               random_multiplex_selection=False,
                               gradient_learn_k=False)
@@ -101,8 +113,6 @@ class TinyLateralNetwork(nn.Module):
     def forward(self, x):
         x = self.conv1(x)
         x = self.relu1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
         x = self.maxpool(x)
         x = self.lcl(x)
         x = torch.flatten(x, 1)
@@ -158,6 +168,7 @@ class TinyLateralNetwork(nn.Module):
                 if current_iteration > 0 and (current_iteration % 1250) == 0:
                     #self.save(f"models/vgg_with_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
                     val_acc, val_loss = self.test(val_loader)
+                    self.train()
                     log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
 
                     if test_loader:
