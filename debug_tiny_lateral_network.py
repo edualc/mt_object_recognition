@@ -76,9 +76,22 @@ class TinyLateralNetwork(nn.Module):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.config = config
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=config['conv_size'], padding=1, kernel_size=(3,3))
-        self.relu1 = nn.Sigmoid()
+        self.act1 = nn.Sigmoid()
         self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
-        # self.lcl = LaterallyConnectedLayer(self.config['num_multiplex'], config['conv_size'], 14, 14,
+        self.lcl = LaterallyConnectedLayer(self.config['num_multiplex'], config['conv_size'], 14, 14,
+                              d=self.config['lcl_distance'],
+                              prd=self.config['lcl_distance'],
+                              disabled=False,
+                              alpha=self.config['lcl_alpha'],
+                              beta=(1 / ((50000/2) / self.config['batch_size'])),
+                              eta=self.config['lcl_eta'],
+                              theta=self.config['lcl_theta'],
+                              iota=self.config['lcl_iota'],
+                              use_scaling=config['use_scaling'],
+                              random_k_change=False,
+                              random_multiplex_selection=False,
+                              gradient_learn_k=False)
+        # self.lcl = LaterallyConnectedLayer2(self.config['num_multiplex'], config['conv_size'], 14, 14,
         #                       d=self.config['lcl_distance'],
         #                       prd=self.config['lcl_distance'],
         #                       disabled=False,
@@ -90,18 +103,6 @@ class TinyLateralNetwork(nn.Module):
         #                       random_k_change=False,
         #                       random_multiplex_selection=False,
         #                       gradient_learn_k=False)
-        self.lcl = LaterallyConnectedLayer2(self.config['num_multiplex'], config['conv_size'], 14, 14,
-                              d=self.config['lcl_distance'],
-                              prd=self.config['lcl_distance'],
-                              disabled=False,
-                              alpha=self.config['lcl_alpha'],
-                              eta=self.config['lcl_eta'],
-                              theta=self.config['lcl_theta'],
-                              iota=self.config['lcl_iota'],
-                              use_scaling=config['use_scaling'],
-                              random_k_change=False,
-                              random_multiplex_selection=False,
-                              gradient_learn_k=False)
         
         self.fc1 = nn.Linear(in_features=config['conv_size']*14*14, out_features=100)
         self.relu3 = nn.ReLU()
@@ -112,7 +113,7 @@ class TinyLateralNetwork(nn.Module):
         
     def forward(self, x):
         x = self.conv1(x)
-        x = self.relu1(x)
+        x = self.act1(x)
         x = self.maxpool(x)
         x = self.lcl(x)
         x = torch.flatten(x, 1)

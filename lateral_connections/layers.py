@@ -23,8 +23,8 @@ from .torch_utils import *
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.1, beta=0.001, gamma=0.001, eta=0.1, theta=0.1, iota=0.1, mu_batch_size=128, num_noisy_iterations=1000,
-        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
+        alpha=0.1, beta=0.001, gamma=0.001, eta=1, theta=0.0, iota=0.1, mu_batch_size=0, num_noisy_iterations=1000,
+        use_scaling=True, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
         
@@ -57,14 +57,18 @@ class LaterallyConnectedLayer(nn.Module):
         self.register_parameter('beta', nn.Parameter(torch.Tensor([beta]), requires_grad=False))
         # Adjustment rate of FM strength
         self.register_parameter('gamma', nn.Parameter(torch.Tensor([gamma]), requires_grad=False))
+        # How the (1-iota)*A + iota*L argmax is calculated
+        self.register_parameter('iota', nn.Parameter(torch.Tensor([iota]), requires_grad=False))
+        
+
+        # DEPRECATED:
         # Parameter to control the amount of noise added to the feature maps
         self.register_parameter('eta', nn.Parameter(torch.Tensor([eta]), requires_grad=False))
         # Rate at which each cell dynamic iteration changes A
         self.register_parameter('theta', nn.Parameter(torch.Tensor([theta]), requires_grad=False))
-        # How the (1-iota)*A + iota*L argmax is calculated
-        self.register_parameter('iota', nn.Parameter(torch.Tensor([iota]), requires_grad=False))
         # Number of images from dataset to calculate initial :mu
         self.register_parameter('mu_batch_size', nn.Parameter(torch.Tensor([mu_batch_size]), requires_grad=False))
+
 
         # lehl@2022-02-10: Applying softmax helps to keep these values somewhat bounded and to
         # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
@@ -83,7 +87,7 @@ class LaterallyConnectedLayer(nn.Module):
         # lateral connection and its historical average
         # TODO: Initialize with a sensible mean, taken from a sample of activations
         self.register_parameter('mu', torch.nn.Parameter(torch.ones((self.n * self.num_fm,)) / self.n, requires_grad=False))
-        self.register_parameter('S', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
+        self.register_parameter('S', torch.nn.Parameter(torch.ones(self.mu.shape), requires_grad=False))
         self.register_parameter('M', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
 
     def __repr__(self):
@@ -128,12 +132,6 @@ class LaterallyConnectedLayer(nn.Module):
         with torch.no_grad():
             batch_size = A.shape[0]
 
-            # lehl@2022-04-23: This should no longer be done, as too much of the feature
-            # maps are replaced!
-            #
-            # # Symmetric padding fix to remove border effect issues from 0-padding
-            # symm_A = symmetric_padding(A, self.prd)
-
             # Generate multiplex cells
             # ---
             # Introduce N identical feature cells to reduce cross talk
@@ -142,20 +140,6 @@ class LaterallyConnectedLayer(nn.Module):
             # be of shape (32, 4*100, 50, 50) with (bs, a, i, j) == (bs, a + 100, i, j)
             #
             self.A = A.repeat(1, self.n, 1, 1)
-
-
-
-
-            # if self.use_scaling:
-            #     # Calculate the activation strength of each feature map
-            #     #
-            #     activation_strength = torch.mean(torch.sum(self.A, dim=(-2,-1)), dim=0) / (self.A.shape[-1] * self.A.shape[2])
-
-            #     l = F.conv2d(self.pad_activations(self.A), minmax_on_fm(self.K.transpose_(0,1)), padding=0)/ (self.A.shape[-1] * self.A.shape[2] * self.num_fm)
-            # import code; code.interact(local=dict(globals(), **locals()))
-
-
-
 
             if self.training:
                 # lehl@2022-05-11: Turns out that noise makes the multiplex cells not specialize
@@ -181,8 +165,10 @@ class LaterallyConnectedLayer(nn.Module):
             # Calculate initial lateral connections
             self.L = F.conv2d(padded_A, minmax_on_fm(self.K.transpose(0, 1)), padding=0) / self.num_fm
 
-            # lehl@2022-05-10: Changing normalization, trying out best N% instead
-            #self.L = softmax_minmax_scaled(self.L)
+            # Apply the feature map scaling
+            if self.use_scaling:
+                self.L *= self.S.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+
             self.L = minmax_on_fm(self.L)
             del padded_A
 
@@ -200,7 +186,7 @@ class LaterallyConnectedLayer(nn.Module):
 
             # Get the argmax indices inside the multiplex cells for each sample in the batch
             fm_indices = A_max.shape[1] * A_max + torch.arange(0, A_max.shape[1]).to(self.device)
-            del A_max
+            # del A_max
             filtered_A = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(self.A, fm_indices)])
 
             k_indices = torch.repeat_interleave(fm_indices.unsqueeze(-1), fm_indices.shape[1], dim=2)
@@ -269,7 +255,7 @@ class LaterallyConnectedLayer(nn.Module):
                             number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
                             K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
 
-                K_change = minmax_on_fm(K_change)
+                # K_change = minmax_on_fm(K_change)
                 
                 # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
                 # that we have no over- or underflows over time. 
@@ -303,14 +289,33 @@ class LaterallyConnectedLayer(nn.Module):
             L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
 
         filtered_L = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(L, fm_indices)])
-        self.O = (1 - self.theta) * A + self.theta * filtered_L
+        
+        # self.O = (1 - self.theta) * A + self.theta * filtered_L
         # import code; code.interact(local=dict(globals(), **locals()))
 
-        # lehl@2022-03-30: TODO - Is this still needed?
-        # if self.training:
-        #     # Update the mean and down-/upscale the feature map strengths
-        #     self.M = (1 - self.beta) * self.M + self.beta * torch.mean(self.A[-1, ...] * self.L * self.S.unsqueeze(-1).unsqueeze(-1), dim=(-2,-1))
-        #     self.S = torch.clip(self.S + self.gamma * (self.mu - self.M), min=0.0, max=1.0)
+        if self.training and self.use_scaling:
+            with torch.no_grad():
+                # Gather which feature maps were active in the batch and calculate the
+                # mean activity
+                #
+                repeat_tensor = torch.arange(self.n.item()).to(self.device)
+                x_idx = torch.repeat_interleave(repeat_tensor, torch.clone(self.num_fm).to(torch.long))
+                y_idx = fm_indices.reshape((torch.numel(fm_indices),))
+
+                # Calculate how active the feature maps in L were and
+                # average across the batch
+                L_act = torch.zeros((L.shape[0], self.num_fm * self.n)).to(torch.long).to(self.device)
+                L_act.index_put_(indices=[x_idx, y_idx], values=torch.tensor(1).to(self.device))
+                L_act = torch.sum(L_act, dim=0) / self.n
+
+                print(L_act)
+
+                # Update the mean and down-/upscale the feature map strengths
+                self.M *= (1-self.beta)
+                self.M += self.beta * L_act
+
+                self.S += self.gamma * (self.mu - self.M)
+                self.S = nn.Parameter(torch.clip(self.S, min=0.5, max=1.5))
 
         # Keep track of number of training iterations
         self.iterations_trained += 1 if self.training else 0

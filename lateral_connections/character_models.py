@@ -382,6 +382,11 @@ class VGGReconstructionLCL(nn.Module):
             vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4) + list(self.vgg.features.pool5)))
             self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit) ]) )
         else:
+            if vgg19_unit[-1].__class__ == nn.ReLU:
+                vgg19_unit[-1] = nn.Tanh()
+            elif vgg19_unit[-2].__class__ == nn.ReLU:
+                vgg19_unit[-2] = nn.Tanh()
+
             self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit), ('lcl', lcl_layer) ]) )
 
         # Freeze the params of the previous layers of VGG19
