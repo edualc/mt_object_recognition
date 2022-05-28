@@ -126,7 +126,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, default='models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt', help='Vgg19 pretrained model to use')
     parser.add_argument('--after_pooling', type=int, default=5, help='after which pooling block the LCL is placed (1-5)')
 
-    parser.add_argument('--use_scaling', default=True, action='store_true', help='Whether ')
+    parser.add_argument('--use_scaling', default=False, action='store_true', help='Whether ')
     parser.add_argument('--num_runs', type=int, default=1, help='Number of models to train')
     parser.add_argument('--random_k_change', default=False, action='store_true', help='Ablation study: use random values for K_change')
     parser.add_argument('--random_multiplex_selection', default=False, action='store_true', help='Ablation study: choose multiplex cells randomly')
