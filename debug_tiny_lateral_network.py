@@ -17,7 +17,7 @@ from lateral_connections import LateralModel, VggModel
 from lateral_connections import VggWithLCL
 from lateral_connections import MNISTCDataset
 from lateral_connections.loaders import get_loaders, load_mnistc
-from lateral_connections.layers import LaterallyConnectedLayer, LaterallyConnectedLayer2
+from lateral_connections.layers import LaterallyConnectedLayer, LaterallyConnectedLayer2, LaterallyConnectedLayer3
 from lateral_connections.torch_utils import *
 
 import wandb
@@ -78,7 +78,7 @@ class TinyLateralNetwork(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=config['conv_size'], padding=1, kernel_size=(3,3))
         self.act1 = nn.Sigmoid()
         self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
-        self.lcl = LaterallyConnectedLayer(self.config['num_multiplex'], config['conv_size'], 14, 14,
+        self.lcl = LaterallyConnectedLayer3(self.config['num_multiplex'], config['conv_size'], 14, 14,
                               d=self.config['lcl_distance'],
                               prd=self.config['lcl_distance'],
                               disabled=False,

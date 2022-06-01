@@ -1,9 +1,9 @@
-import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
 from .torch_utils import *
 
+import wandb
 
 # PyTorch layer implementation of the laterally connected layer (LCL)
 #
@@ -322,6 +322,188 @@ class LaterallyConnectedLayer(nn.Module):
 
         return filtered_L
         # return self.O
+
+class LaterallyConnectedLayer3(LaterallyConnectedLayer):
+    def forward(self, A):
+        if self.disabled:
+            return torch.clone(A)
+
+        with torch.no_grad():
+            batch_size = A.shape[0]
+
+            # Generate multiplex cells
+            # ---
+            # Introduce N identical feature cells to reduce cross talk
+            # Multiplied feature maps are treated as feature maps on the same level, i.e.
+            # for activations A of shape (32, 100, 50, 50) and n=4, we expect the new A to
+            # be of shape (32, 4*100, 50, 50) with (bs, a, i, j) == (bs, a + 100, i, j)
+            #
+            self.A = A.repeat(1, self.n, 1, 1)
+
+            padded_A = self.pad_activations(self.A)
+
+            # =======================================================================================
+            #   LATERAL ACTIVITY IMPACT CALCULATION
+            # =======================================================================================
+            #
+            impact = []
+            for idx in range(padded_A.shape[1]):
+                kernel = self.K[:, idx, ...].unsqueeze(1)
+                lateral_impact = F.conv2d(padded_A, kernel, groups=int(self.n*self.num_fm), padding=0)
+
+                impact.append(torch.sum(lateral_impact.unsqueeze(2), dim=(-2,-1)))
+
+            # impact shape = [batch, source_fm, target_fm]
+            #
+            impact = torch.cat(impact, dim=2)
+
+            # =======================================================================================
+            #   NOISE ADDITION
+            # =======================================================================================
+            #
+            if self.training:
+                # lehl@2022-05-11: Turns out that noise makes the multiplex cells not specialize
+                # enough and should --- after some initial training --- be turned off
+                #
+                if self.iterations_trained < self.num_noisy_iterations:
+                    noise_multiplier = 1
+
+                    # Gradually remove the noise over time
+                    #
+                    if self.iterations_trained > self.num_noisy_iterations // 2:
+                        noise_multiplier = (self.num_noisy_iterations - self.iterations_trained) / (self.num_noisy_iterations // 2)
+
+                    # Add noise to help break the symmetry between initially
+                    # identical multiplex cells
+                    #
+                    noise = torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
+                    impact *= noise
+
+            # =======================================================================================
+            #   ACTIVE MULTIPLEX SELECTION
+            # =======================================================================================
+            #
+            # Remove self-references from lateral impact (wrt. multiplex repetitions)
+            #
+            for fm_i in range(self.num_fm):
+                impact[:, fm_i::self.num_fm, fm_i::self.num_fm] = 0
+
+            # Taking a quantile threshold for each target_fm (= across source_fms)
+            #
+            impact_threshold = torch.quantile(impact, 0.8, dim=1)
+
+            indices = torch.where(impact >= impact_threshold.unsqueeze(1))
+
+            large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
+            active_multiplex_mask = torch.zeros(large_K.shape, device=self.device, dtype=torch.bool)
+            active_multiplex_mask[indices] = 1.0
+
+            large_K *= active_multiplex_mask
+
+            if not wandb.run.disabled:
+                if (self.iterations_trained % 50) == 0:
+                    wandb.log({
+                        'lcl': {
+                            'impact': {
+                                'min': round(impact.min().item(), 4),
+                                'max': round(impact.max().item(), 4),
+                                'mean': round(impact.mean().item(), 4),
+                                'median': round(torch.quantile(impact, 0.5).item(), 4)
+                            },
+                            'multiplex_selection': torch.sum(active_multiplex_mask[:,:,:,0,0], dim=(0,2))/batch_size
+                        }
+                    })
+
+            # =======================================================================================
+            #   KERNEL UPDATE
+            # =======================================================================================
+            #
+            if self.training:
+                if self.random_k_change:
+                    K_change = torch.rand(size=self.K.shape, device=self.device)
+
+                else:
+                    # Lateral Connection Reinforcement
+                    K_change = torch.zeros(size=self.K.shape, device=self.device)
+
+                    # Iterate through the different necessary shifts between the feature maps
+                    # to account for all positions in the kernel K
+                    #
+                    for x in range(self.K.shape[-2]):
+                        for y in range(self.K.shape[-1]):
+                            # source and target feature maps are transposed to enable broadcasting across
+                            # the batch size dimension
+                            #
+                            xoff_f = - self.d + x
+                            yoff_f = - self.d + y
+                            source_fms = self.A[:, :, max(0,xoff_f):self.A.shape[-2]+min(xoff_f,0), max(0,yoff_f):self.A.shape[-1]+min(0,yoff_f)]
+                            source_fms = source_fms.transpose(0,1)
+
+                            xoff_i = self.d - x
+                            yoff_i = self.d - y
+                            target_fms = self.A[:, :, max(0,xoff_i):self.A.shape[-2]+min(xoff_i,0), max(0,yoff_i):self.A.shape[-1]+min(0,yoff_i)]
+                            target_fms = target_fms.transpose(0,1).unsqueeze(1)
+
+                            # calculate the product of all feature maps (source) together with the
+                            # to-be-influenced feature map (target) efficiently
+                            #
+                            # Initially, self.A contains [batch_size, num_fm, fm_height, fm_width] dimensions
+                            #
+                            # Designations of einsum characters:
+                            #   a:  Extra dim to ensure each FM in target is multipled with the whole source blob
+                            #   b:  Feature Map #
+                            #   c:  Batch (see the transpose(0,1) calls)
+                            #   d:  Feature Map Height
+                            #   e:  Feature Map Width
+                            #
+                            tmp = torch.einsum('abcde,bcde->cab', target_fms, source_fms)
+
+                            # inhibit inactive multiplex cell changes
+                            #
+                            tmp *= active_multiplex_mask[:,:,:,0,0]
+
+                            # inhibit multiplex repetitions
+                            #
+                            diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item(), device=self.device).repeat(self.n, self.n)
+                            diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
+                            tmp *= diagonal_repetition_mask.unsqueeze(0)
+
+                            # Average across the batch size
+                            #
+                            number_of_samples_per_pixel = torch.count_nonzero(tmp, dim=0)
+                            number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
+                            K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
+                
+                # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
+                # that we have no over- or underflows over time. 
+                #
+                # should hold: | alpha * K_change + (1 - alpha) * K | === 1
+                #
+                self.K *= (1 - self.alpha)
+                self.K += self.alpha * K_change
+                # del K_change
+
+        # =======================================================================================
+        #   CALCULATE OUTPUT
+        # =======================================================================================
+        #
+        large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
+        large_K *= active_multiplex_mask
+
+        L = torch.zeros((batch_size, self.n*self.num_fm, self.fm_height, self.fm_width), device=self.device)
+
+        for b in range(batch_size):
+            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
+
+        # Keep track of number of training iterations
+        self.iterations_trained += 1 if self.training else 0
+
+        output = torch.sum(L.reshape((batch_size, self.n, self.num_fm, L.shape[-2], L.shape[-1])), dim=1)
+
+        return output
+
+
+
 
 class LaterallyConnectedLayer2(LaterallyConnectedLayer):
 
