@@ -51,7 +51,7 @@ def main(args):
 def train_network(config):
     base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
     wandb_run_name = base_name + '_LCL' + str(args.after_pooling) + '_d' + str(args.lcl_distance)
-    wandb_group_name = 'VGG19R_Scaling'
+    wandb_group_name = 'VGG19R_Scaling_LRgood'
 
     if config['use_scaling']:
         wandb_group_name += '__use_scaling'
@@ -113,7 +113,7 @@ def train_network(config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate of VGG19\'s optimizer')
+    parser.add_argument('--lr', type=float, default=3e-5, help='Learning rate of VGG19\'s optimizer')
     parser.add_argument('--num_multiplex', type=int, default=4, help='Number of multiplex cells in LCL layers')
     parser.add_argument('--batch_size', type=int, default=10, help='Batch size')
     parser.add_argument('--num_epochs', type=int, default=10, help='Number of epochs trained')
