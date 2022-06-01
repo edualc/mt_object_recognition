@@ -44,14 +44,16 @@ def main(args):
         'fc_only': args.fc_only,
 
         'no_pretrained_vgg': args.no_pretrained_vgg,
+        'use_new_lcl': args.use_new_lcl
     }
 
     train_network(config)
 
 def train_network(config):
     base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    wandb_run_name = base_name + '_LCL' + str(args.after_pooling) + '_d' + str(args.lcl_distance)
-    wandb_group_name = 'VGG19R_Scaling'
+
+    wandb_run_name = base_name + '_LCL' + ('v3' if args.use_new_lcl else '') + str(args.after_pooling) + '_d' + str(args.lcl_distance)
+    wandb_group_name = 'VGG19R'
 
     if config['use_scaling']:
         wandb_group_name += '__use_scaling'
@@ -81,7 +83,7 @@ def train_network(config):
             # group='debug',
             name=wandb_run_name,
             config=config,
-            # mode='disabled',
+            mode='disabled',
         )
 
     vgg = VggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=0.2)
@@ -95,7 +97,8 @@ def train_network(config):
         random_multiplex_selection=config['random_multiplex_selection'],
         gradient_learn_k=config['gradient_learn_k'],
         fc_only=config['fc_only'],
-        freeze_vgg=(not config['no_pretrained_vgg']))
+        freeze_vgg=(not config['no_pretrained_vgg']),
+        use_new_lcl=config['use_new_lcl'])
     # import code; code.interact(local=dict(globals(), **locals()))
     del vgg
     print(model)
@@ -134,6 +137,7 @@ if __name__ == '__main__':
     parser.add_argument('--fc_only', default=False, action='store_true', help='Ablation study: reconstruct VGG19 without LCL, only add new fully connected layer')
 
     parser.add_argument('--no_pretrained_vgg', default=False, action='store_true', help='Whether the pre-trained VGG should be used as a starting point')
+    parser.add_argument('--use_new_lcl', default=False, action='store_true', help='whether to use the LCL3')
 
     args = parser.parse_args()
 

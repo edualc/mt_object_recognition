@@ -16,7 +16,7 @@ from torchvision.models.vgg import VGG
 
 import wandb
 
-from .layers import LaterallyConnectedLayer
+from .layers import LaterallyConnectedLayer, LaterallyConnectedLayer3
 
 
 # Taken from https://pytorch.org/vision/main/_modules/torchvision/models/vgg.html#vgg19
@@ -271,7 +271,7 @@ class SmallVggWithLCL(VggWithLCL):
 class VGGReconstructionLCL(nn.Module):
     def __init__(self, vgg, after_pooling=3, learning_rate=3e-4, num_multiplex=4, run_identifier="",
         lcl_distance=2, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2,
-        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False, fc_only=False, freeze_vgg=True):
+        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False, fc_only=False, freeze_vgg=True, use_new_lcl=False):
 
         super(VGGReconstructionLCL, self).__init__()
 
@@ -300,6 +300,7 @@ class VGGReconstructionLCL(nn.Module):
         self.gradient_learn_k = gradient_learn_k
         self.fc_only = fc_only
 
+        self.use_new_lcl = use_new_lcl
 
         self._reconstruct_from_vgg()
 
@@ -348,33 +349,38 @@ class VGGReconstructionLCL(nn.Module):
 
             return result
 
+        if self.use_new_lcl:
+            lcl_class = LaterallyConnectedLayer3
+        else:
+            lcl_class = LaterallyConnectedLayer
+
         if self.after_pooling == 1:
             vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1)))
-            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 64, 112, 112, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+            lcl_layer = lcl_class(self.num_multiplex, 64, 112, 112, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
                     use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
 
         elif self.after_pooling == 2:
             vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2)))
-            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 128, 56, 56, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+            lcl_layer = lcl_class(self.num_multiplex, 128, 56, 56, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
                     use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
 
         elif self.after_pooling == 3:
             vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))
-            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+            lcl_layer = lcl_class(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
                     use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
 
         elif self.after_pooling == 4:
             vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4)))
-            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 512, 14, 14, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+            lcl_layer = lcl_class(self.num_multiplex, 512, 14, 14, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
                     use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
 
         elif self.after_pooling == 5:
             vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4) + list(self.vgg.features.pool5)))
-            lcl_layer = LaterallyConnectedLayer(self.num_multiplex, 512, 7, 7, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+            lcl_layer = lcl_class(self.num_multiplex, 512, 7, 7, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
                     alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
                     use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
 
