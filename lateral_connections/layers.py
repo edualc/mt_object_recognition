@@ -408,7 +408,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                                 'min': round(impact.min().item(), 4),
                                 'max': round(impact.max().item(), 4),
                                 'mean': round(impact.mean().item(), 4),
-                                'median': round(torch.quantile(impact, 0.5).item(), 4)
+                                #'median': round(torch.quantile(impact, 0.5).item(), 4)
                             },
                             'multiplex_selection': torch.sum(active_multiplex_mask[:,:,:,0,0], dim=(0,2))/batch_size
                         }
