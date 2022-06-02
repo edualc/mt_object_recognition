@@ -351,6 +351,9 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 kernel = self.K[:, idx, ...].unsqueeze(1)
                 lateral_impact = F.conv2d(padded_A, kernel, groups=int(self.n*self.num_fm), padding=0)
 
+                if self.use_scaling:
+                    lateral_impact *= self.S.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+
                 impact.append(torch.sum(lateral_impact.unsqueeze(2), dim=(-2,-1)))
 
             # impact shape = [batch, source_fm, target_fm]
@@ -376,8 +379,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                     # Add noise to help break the symmetry between initially
                     # identical multiplex cells
                     #
-                    noise = torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
-                    impact *= noise
+                    noise = noise_multiplier * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
+                    impact += noise
 
             # =======================================================================================
             #   ACTIVE MULTIPLEX SELECTION
@@ -385,32 +388,54 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             #
             # Remove self-references from lateral impact (wrt. multiplex repetitions)
             #
-            for fm_i in range(self.num_fm):
-                impact[:, fm_i::self.num_fm, fm_i::self.num_fm] = 0
+            diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item(), device=self.device).repeat(self.n, self.n)
+            diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
+            impact *= diagonal_repetition_mask.unsqueeze(0)
+
+            # Select the highest active multiplex cell and disable others
+            #
+            # Implementation uses the answer provided here:
+            # https://discuss.pytorch.org/t/set-max-value-to-1-others-to-0/44350/8
+            # (calculate argmax along the different multiplex cell repetitions)
+            #
+            impact_reshaped = impact.reshape((batch_size, self.n, self.num_fm, self.n * self.num_fm))
+
+            idx = torch.argmax(impact_reshaped, dim=1, keepdims=True)
+            active_multiplex_mask = torch.zeros_like(impact_reshaped).scatter_(1, idx, 1.)
+            active_multiplex_mask = active_multiplex_mask.reshape((batch_size, self.n*self.num_fm, self.n*self.num_fm))
+
+            impact *= active_multiplex_mask
 
             # Taking a quantile threshold for each target_fm (= across source_fms)
             #
-            impact_threshold = torch.quantile(impact, 0.8, dim=1)
-
-            indices = torch.where(impact >= impact_threshold.unsqueeze(1))
+            # (!!!)     lehl@2022-06-02:
+            #           TODO2 - Change from 20% selection at source to 20% at target (source: dim=1, target: dim=2)
+            #
+            impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
+            indices = torch.where(impact >= impact_threshold.unsqueeze(-1).unsqueeze(-1))
+            # impact_threshold = torch.quantile(impact, 0.8, dim=1)
+            # indices = torch.where(impact >= impact_threshold.unsqueeze(1))
+            # impact_threshold = torch.quantile(impact, 0.8, dim=2)
+            # indices = torch.where(impact >= impact_threshold.unsqueeze(2))
 
             large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
-            active_multiplex_mask = torch.zeros(large_K.shape, device=self.device, dtype=torch.bool)
-            active_multiplex_mask[indices] = 1.0
+            selected_multiplex_mask = torch.zeros(large_K.shape, device=self.device, dtype=torch.bool)
+            selected_multiplex_mask[indices] = 1.0
 
-            large_K *= active_multiplex_mask
+            large_K *= selected_multiplex_mask
 
             if not wandb.run.disabled:
-                if (self.iterations_trained % 50) == 0:
+                if ((self.iterations_trained % 50) == 0) and self.training:
                     wandb.log({
                         'lcl': {
                             'impact': {
                                 'min': round(impact.min().item(), 4),
                                 'max': round(impact.max().item(), 4),
-                                'mean': round(impact.mean().item(), 4),
-                                #'median': round(torch.quantile(impact, 0.5).item(), 4)
+                                'mean': round(impact.mean().item(), 4)
                             },
-                            'multiplex_selection': torch.sum(active_multiplex_mask[:,:,:,0,0], dim=(0,2))/batch_size
+                            'num_active_mlpx': torch.sum(active_multiplex_mask),
+                            'num_selected_mlpx': torch.sum(selected_multiplex_mask),
+                            'multiplex_selection': torch.sum(selected_multiplex_mask[:,:,:,0,0], dim=(0,2))/batch_size
                         }
                     })
 
@@ -460,7 +485,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
                             # inhibit inactive multiplex cell changes
                             #
-                            tmp *= active_multiplex_mask[:,:,:,0,0]
+                            tmp *= selected_multiplex_mask[:,:,:,0,0]
 
                             # inhibit multiplex repetitions
                             #
@@ -488,17 +513,43 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         # =======================================================================================
         #
         large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
-        large_K *= active_multiplex_mask
+        large_K *= selected_multiplex_mask
 
         L = torch.zeros((batch_size, self.n*self.num_fm, self.fm_height, self.fm_width), device=self.device)
 
         for b in range(batch_size):
             L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
 
+        output = torch.sum(L.reshape((batch_size, self.n, self.num_fm, L.shape[-2], L.shape[-1])), dim=1)
+
+        # =======================================================================================
+        #   UPDATE SCALING / MEAN ACTIVITY
+        # =======================================================================================
+        #
+        if self.training and self.use_scaling:
+            with torch.no_grad():
+                # Perform "mean" history update
+                # (including a scaling of the activity history)
+                #
+                self.M *= (1-self.beta)
+                activity = (torch.sum(selected_multiplex_mask[:,:,:,0,0], dim=(0,2)) / batch_size)
+                self.M += self.beta * (activity / (self.num_fm * self.n))
+
+                # Scale cell strength
+                self.S += self.gamma * (self.mu - self.M)
+                self.S.data = torch.clip(self.S, min=0.5, max=2)
+
+                if not wandb.run.disabled:
+                    if ((self.iterations_trained % 50) == 0) and self.training:
+                        wandb.log({
+                            'lcl': {
+                                'S': self.S.data.cpu().numpy(),
+                                'M': self.M.data.cpu().numpy()
+                            }
+                        })
+
         # Keep track of number of training iterations
         self.iterations_trained += 1 if self.training else 0
-
-        output = torch.sum(L.reshape((batch_size, self.n, self.num_fm, L.shape[-2], L.shape[-1])), dim=1)
 
         return output
 
