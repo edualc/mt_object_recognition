@@ -540,7 +540,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 self.S.data = torch.clip(self.S, min=0.5, max=2)
 
                 if not wandb.run.disabled:
-                    if ((self.iterations_trained % 50) == 0) and self.training:
+                    if ((self.iterations_trained % 50) == 0):
                         wandb.log({
                             'lcl': {
                                 'S': self.S.data.cpu().numpy(),

@@ -98,7 +98,8 @@ def train_network(config):
         gradient_learn_k=config['gradient_learn_k'],
         fc_only=config['fc_only'],
         freeze_vgg=(not config['no_pretrained_vgg']),
-        use_new_lcl=config['use_new_lcl'])
+        use_new_lcl=config['use_new_lcl'],
+        use_scaling=config['use_scaling'])
     # import code; code.interact(local=dict(globals(), **locals()))
     del vgg
     print(model)
