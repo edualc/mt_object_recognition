@@ -434,8 +434,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                                 'mean': round(impact.mean().item(), 4)
                             },
                             'num_active_mlpx': torch.sum(active_multiplex_mask),
-                            'num_selected_mlpx': torch.sum(selected_multiplex_mask),
-                            'multiplex_selection': torch.sum(selected_multiplex_mask[:,:,:,0,0], dim=(0,2))/batch_size
+                            'num_selected_mlpx': torch.sum(selected_multiplex_mask[...,0,0]),
+                            'multiplex_selection': torch.sum(selected_multiplex_mask[...,0,0], dim=(0,2))/batch_size
                         }
                     })
 
