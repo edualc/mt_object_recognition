@@ -37,7 +37,7 @@ config = {
     'lcl_iota': 0.2,
     'lcl_distance': 1,
     'conv_size': 5,
-    'use_scaling': False,
+    'use_scaling': True,
 }
 
 base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -52,7 +52,7 @@ wandb.init(
     group='debug',
     name=wandb_run_name,
     config=config,
-    #mode='disabled',
+    # mode='disabled',
 )
 
 def plot_kernels(model, plot_scale=3):

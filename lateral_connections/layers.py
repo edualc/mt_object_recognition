@@ -86,7 +86,7 @@ class LaterallyConnectedLayer(nn.Module):
         # Initialization of S, M and mu, saving the scaling factor of each
         # lateral connection and its historical average
         # TODO: Initialize with a sensible mean, taken from a sample of activations
-        self.register_parameter('mu', torch.nn.Parameter(torch.ones((self.n * self.num_fm,)) / self.n, requires_grad=False))
+        self.register_parameter('mu', torch.nn.Parameter(torch.ones((self.n * self.num_fm,)) * 0.2, requires_grad=False))
         self.register_parameter('S', torch.nn.Parameter(torch.ones(self.mu.shape), requires_grad=False))
         self.register_parameter('M', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
 
@@ -392,6 +392,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
             impact *= diagonal_repetition_mask.unsqueeze(0)
 
+
+
             # Select the highest active multiplex cell and disable others
             #
             # Implementation uses the answer provided here:
@@ -406,6 +408,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
             impact *= active_multiplex_mask
 
+
+
             # Taking a quantile threshold for each target_fm (= across source_fms)
             #
             # (!!!)     lehl@2022-06-02:
@@ -413,8 +417,10 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             #
             impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
             indices = torch.where(impact >= impact_threshold.unsqueeze(-1).unsqueeze(-1))
+
             # impact_threshold = torch.quantile(impact, 0.8, dim=1)
             # indices = torch.where(impact >= impact_threshold.unsqueeze(1))
+            
             # impact_threshold = torch.quantile(impact, 0.8, dim=2)
             # indices = torch.where(impact >= impact_threshold.unsqueeze(2))
 
@@ -433,8 +439,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                                 'max': round(impact.max().item(), 4),
                                 'mean': round(impact.mean().item(), 4)
                             },
-                            'num_active_mlpx': torch.sum(active_multiplex_mask),
-                            'num_selected_mlpx': torch.sum(selected_multiplex_mask[...,0,0]),
+                            'num_active_mlpx': torch.sum(active_multiplex_mask) / batch_size,
+                            'num_selected_mlpx': torch.sum(selected_multiplex_mask[...,0,0]) / batch_size,
                             'multiplex_selection': torch.sum(selected_multiplex_mask[...,0,0], dim=(0,2))/batch_size
                         }
                     })

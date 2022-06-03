@@ -305,8 +305,8 @@ class VGGReconstructionLCL(nn.Module):
         self._reconstruct_from_vgg()
 
         self.loss_fn = nn.CrossEntropyLoss()
-        # self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
-        self.optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
+        self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
+        # self.optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
 
     # lehl@2022-04-17: Replacement of Convnet/FC layers after LCL through only new FC layers,
     # where the number of parameters is changed such that the majority of parameters lie in the LCL

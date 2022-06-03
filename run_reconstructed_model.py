@@ -53,7 +53,7 @@ def train_network(config):
     base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
 
     wandb_run_name = base_name + '_LCL' + ('v3' if args.use_new_lcl else '') + '_d' + str(args.lcl_distance)
-    wandb_group_name = 'VGG19R_v3.1'
+    wandb_group_name = 'VGG19R_v3.1_SGD'
 
     if config['use_scaling']:
         wandb_group_name += '__use_scaling'
