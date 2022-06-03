@@ -27,7 +27,7 @@ DO_WANDB = True
 
 config = {
     'num_classes': 10,
-    'learning_rate': 3e-4,
+    'learning_rate': 3e-5,
     'num_multiplex': 4,
     'batch_size': 4,
     'num_epochs': 20,
@@ -37,7 +37,7 @@ config = {
     'lcl_iota': 0.2,
     'lcl_distance': 1,
     'conv_size': 5,
-    'use_scaling': True,
+    'use_scaling': False,
 }
 
 base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -52,7 +52,7 @@ wandb.init(
     group='debug',
     name=wandb_run_name,
     config=config,
-    mode='disabled',
+    #mode='disabled',
 )
 
 def plot_kernels(model, plot_scale=3):
@@ -109,8 +109,9 @@ class TinyLateralNetwork(nn.Module):
         self.fc2 = nn.Linear(in_features=100, out_features=self.config['num_classes'])
         
         self.loss_fn = nn.CrossEntropyLoss()
-        self.optimizer = optim.SGD(self.parameters(), lr=self.config['learning_rate'], momentum=0.9, weight_decay=0.0005)
-        
+        # self.optimizer = optim.SGD(self.parameters(), lr=self.config['learning_rate'], momentum=0.9, weight_decay=0.0005)
+        self.optimizer = optim.Adam(self.parameters(), lr=self.config['learning_rate'])
+
     def forward(self, x):
         x = self.conv1(x)
         x = self.act1(x)

@@ -512,6 +512,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         #   CALCULATE OUTPUT
         # =======================================================================================
         #
+        padded_A = self.pad_activations(torch.clone(A.repeat(1, self.n, 1, 1)))
+
         large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
         large_K *= selected_multiplex_mask
 
