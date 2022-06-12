@@ -72,8 +72,9 @@ class LaterallyConnectedLayer(nn.Module):
 
         # lehl@2022-02-10: Applying softmax helps to keep these values somewhat bounded and to
         # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
-        K = torch.zeros((self.n*self.num_fm, self.n*self.num_fm, self.k, self.k))
-        #K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
+        # K = torch.zeros((self.n*self.num_fm, self.n*self.num_fm, self.k, self.k))
+        # K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
+        K = torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k))
         self.register_parameter('K', torch.nn.Parameter(K, requires_grad=False))
         del K
 
@@ -163,7 +164,7 @@ class LaterallyConnectedLayer(nn.Module):
             padded_A = self.pad_activations(self.A)
             
             # Calculate initial lateral connections
-            self.L = F.conv2d(padded_A, minmax_on_fm(self.K.transpose(0, 1)), padding=0) / self.num_fm
+            self.L = F.conv2d(padded_A, minmax_on_fm(self.K), padding=0) / self.num_fm
 
             # Apply the feature map scaling
             if self.use_scaling:
@@ -286,7 +287,7 @@ class LaterallyConnectedLayer(nn.Module):
         L = torch.zeros((batch_size, self.n*self.num_fm, self.fm_height, self.fm_width), device=self.device)
 
         for b in range(batch_size):
-            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
+            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...]), padding=0) / self.num_fm
 
         filtered_L = torch.stack([torch.index_select(i, dim=0, index=j) for i,j in zip(L, fm_indices)])
         
@@ -324,7 +325,35 @@ class LaterallyConnectedLayer(nn.Module):
         # return self.O
 
 class LaterallyConnectedLayer3(LaterallyConnectedLayer):
-    def forward(self, A):
+    def forward_debug(self, output, impact, A, indices):
+        self.debug = {
+            'impact': impact,
+            'indices': indices
+        }
+
+        if self.iterations_trained % 50 == 0:
+            batch_i, source_i, target_i = indices
+
+            selected = torch.zeros((self.num_fm*self.n, self.num_fm*self.n))
+            selected[source_i, target_i] = 1
+
+            try:
+                self.overall_impact += torch.clone(selected)
+            except AttributeError:
+                self.overall_impact = torch.clone(selected)                
+
+            import matplotlib.pyplot as plt
+
+            fig, axs = plt.subplots(1, 2)
+            axs[0].imshow(selected, vmin=0, vmax=1)
+            axs[1].imshow(self.overall_impact)
+            plt.show()
+
+
+
+            # import code; code.interact(local=dict(globals(), **locals()))
+
+    def forward(self, A, noise_override=None):
         if self.disabled:
             return torch.clone(A)
 
@@ -359,6 +388,15 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             # impact shape = [batch, source_fm, target_fm]
             #
             impact = torch.cat(impact, dim=2)
+        
+            # lehl@2022-06-09: Normalize impact to [0, 1]
+            # to ensure the noise is proportional in size
+            #
+            impact -= impact.min()
+            if impact.max != 0:
+                impact /= impact.max()
+
+            self.impact_raw = torch.clone(impact)
 
             # =======================================================================================
             #   NOISE ADDITION
@@ -369,18 +407,27 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 # enough and should --- after some initial training --- be turned off
                 #
                 if self.iterations_trained < self.num_noisy_iterations:
-                    noise_multiplier = 1
 
-                    # Gradually remove the noise over time
-                    #
-                    if self.iterations_trained > self.num_noisy_iterations // 2:
-                        noise_multiplier = (self.num_noisy_iterations - self.iterations_trained) / (self.num_noisy_iterations // 2)
 
-                    # Add noise to help break the symmetry between initially
-                    # identical multiplex cells
-                    #
-                    noise = noise_multiplier * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
-                    impact += noise
+                    impact += self.eta * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
+
+                    # noise_multiplier = 1
+
+                    # # Gradually remove the noise over time
+                    # #
+                    # if self.iterations_trained > self.num_noisy_iterations // 2:
+                    #     noise_multiplier = (self.num_noisy_iterations - self.iterations_trained) / (self.num_noisy_iterations // 2)
+
+                    # # Add noise to help break the symmetry between initially
+                    # # identical multiplex cells
+                    # #
+                    # noise = noise_multiplier * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
+                    # impact += noise
+
+            self.after_noise = torch.clone(impact)
+
+            if noise_override is not None:
+                impact += noise_override
 
             # =======================================================================================
             #   ACTIVE MULTIPLEX SELECTION
@@ -389,11 +436,14 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             # Remove self-references from lateral impact (wrt. multiplex repetitions)
             #
             diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item(), device=self.device).repeat(self.n, self.n)
-            diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
+            # lehl@2022-06-09: TODO: Reenable self-connection?
+            # diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
             impact *= diagonal_repetition_mask.unsqueeze(0)
 
 
-
+            # (!!!)     lehl@2022-06-03: 
+            #           TODO: Is this why it degrades?
+            #
             # Select the highest active multiplex cell and disable others
             #
             # Implementation uses the answer provided here:
@@ -408,14 +458,17 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
             impact *= active_multiplex_mask
 
-
-
             # Taking a quantile threshold for each target_fm (= across source_fms)
             #
             # (!!!)     lehl@2022-06-02:
             #           TODO2 - Change from 20% selection at source to 20% at target (source: dim=1, target: dim=2)
             #
-            impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
+            # threshold :th is based on the already turned off multiplex cells, i.e. only :num_fm should be available
+            # but chosen from :num_fm * :n indices
+            #
+            th = float(1 - (0.5 / self.n)) # (1 - top%/n)
+            impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), th, dim=1)
+            # impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
             indices = torch.where(impact >= impact_threshold.unsqueeze(-1).unsqueeze(-1))
 
             # impact_threshold = torch.quantile(impact, 0.8, dim=1)
@@ -510,8 +563,15 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 #
                 # should hold: | alpha * K_change + (1 - alpha) * K | === 1
                 #
-                self.K *= (1 - self.alpha)
+                # lehl@2022-06-12: Ensure that only the kernels are reduced which are also updated
+                #
+                abs_sum = torch.sum(torch.abs(K_change), dim=(-2,-1))
+                changing_kernels = abs_sum.to(torch.bool).to(torch.long).unsqueeze(-1).unsqueeze(-1)
+                unchanged_kernels = 1 - changing_kernels
+
+                self.K *= (1 - self.alpha) * changing_kernels + unchanged_kernels
                 self.K += self.alpha * K_change
+                #print("K_change (SUM):", torch.sum(self.alpha*K_change))
                 # del K_change
 
         # =======================================================================================
@@ -526,7 +586,9 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         L = torch.zeros((batch_size, self.n*self.num_fm, self.fm_height, self.fm_width), device=self.device)
 
         for b in range(batch_size):
-            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...].transpose(0,1)), padding=0) / self.num_fm
+            # lehl@2022-06-10: No need to transpose the large_K!
+            #
+            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...]), padding=0) / self.num_fm
 
         output = torch.sum(L.reshape((batch_size, self.n, self.num_fm, L.shape[-2], L.shape[-1])), dim=1)
 
@@ -558,6 +620,10 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
         # Keep track of number of training iterations
         self.iterations_trained += 1 if self.training else 0
+
+        # Method to be plugged in for debugging reasons
+        self.forward_debug(output, impact, A, indices)
+
 
         return output
 

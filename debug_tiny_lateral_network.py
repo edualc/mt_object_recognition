@@ -37,7 +37,7 @@ config = {
     'lcl_iota': 0.2,
     'lcl_distance': 1,
     'conv_size': 5,
-    'use_scaling': True,
+    'use_scaling': False,
 }
 
 base_name = datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
@@ -52,7 +52,7 @@ wandb.init(
     group='debug',
     name=wandb_run_name,
     config=config,
-    # mode='disabled',
+    mode='disabled',
 )
 
 def plot_kernels(model, plot_scale=3):
@@ -76,7 +76,7 @@ class TinyLateralNetwork(nn.Module):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.config = config
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=config['conv_size'], padding=1, kernel_size=(3,3))
-        self.act1 = nn.Sigmoid()
+        self.act1 = nn.Tanh()
         self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
         self.lcl = LaterallyConnectedLayer3(self.config['num_multiplex'], config['conv_size'], 14, 14,
                               d=self.config['lcl_distance'],

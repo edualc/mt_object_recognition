@@ -5,6 +5,60 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.io.image import read_image
 from PIL import Image
 
+
+class TinyDataset(Dataset):
+    def __init__(self):
+        self.labels = torch.arange(10).to(torch.long)
+        self.data = self.build_dataset()
+
+    def __len__(self):
+        return 10
+
+    def __getitem__(self, idx):
+        image = self.data[idx]
+        label = self.labels[idx]
+
+        return image, label
+
+    def build_dataset(self):
+        images = torch.zeros(10, 1, 28, 28)
+
+        images[0] = 0
+
+        images[1, 0, 0::4, :] = 1
+        images[1, 0, 1::4, :] = 1
+        images[2, 0, 1::4, :] = 1
+        images[2, 0, 2::4, :] = 1
+        images[3, 0, 2::4, :] = 1
+        images[3, 0, 3::4, :] = 1
+        images[4, 0, 3::4, :] = 1
+        images[4, 0, 0::4, :] = 1
+
+        images[5, 0, :, 0::4] = 1
+        images[5, 0, :, 1::4] = 1
+        images[6, 0, :, 1::4] = 1
+        images[6, 0, :, 2::4] = 1
+        images[7, 0, :, 2::4] = 1
+        images[7, 0, :, 3::4] = 1
+        images[8, 0, :, 3::4] = 1
+        images[8, 0, :, 0::4] = 1
+
+        images[9] = 1
+        return images
+
+class TinyDatasetEasy(TinyDataset):
+    def __init__(self):
+        self.labels = torch.Tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1]).to(torch.long)
+        self.data = self.build_dataset()
+
+    def build_dataset(self):
+        images = torch.zeros(10, 1, 28, 28)
+        
+        images[:5, 0, 0::4, :] = 1
+        images[5:, 0, :, 0::4] = 1
+
+        return images
+
 # lehl@2021-12-31: Based on the documentation for custom PyTorch datasets at
 # https://pytorch.org/tutorials/beginner/basics/data_tutorial.html#creating-a-custom-dataset-for-your-files
 #
