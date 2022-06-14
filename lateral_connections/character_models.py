@@ -488,7 +488,6 @@ class VGGReconstructionLCL(nn.Module):
 
                     if test_loader:
                         test_acc, test_loss = self.test(test_loader)
-                        self.train()
                         log_dict['test_acc'] = test_acc
                         log_dict['test_loss'] = test_loss
 

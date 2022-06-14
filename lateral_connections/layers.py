@@ -75,6 +75,11 @@ class LaterallyConnectedLayer(nn.Module):
         # K = torch.zeros((self.n*self.num_fm, self.n*self.num_fm, self.k, self.k))
         # K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
         K = torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k))
+        
+        # lehl@022-06-14: Set self connections to zero
+        diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item()).repeat(self.n, self.n)
+        diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n))
+        K *= diagonal_repetition_mask.unsqueeze(-1).unsqueeze(-1)
         self.register_parameter('K', torch.nn.Parameter(K, requires_grad=False))
         del K
 
@@ -557,23 +562,26 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                             number_of_samples_per_pixel = torch.count_nonzero(tmp, dim=0)
                             number_of_samples_per_pixel[torch.where(number_of_samples_per_pixel == 0)] = 1
                             K_change[:, :, x, y] = torch.sum(tmp, dim=0) / number_of_samples_per_pixel
+
+                # lehl@2022-06-14: Normalization down to [0, 1] range for K_change
+                # (and subsequently the kernel itself)
+                #
+                K_change /= self.K.shape[-2] * self.K.shape[-1]
                 
-                # lehl@2022-02-10: Apply the softmax to the K changes per feature map, such
-                # that we have no over- or underflows over time. 
-                #
-                # should hold: | alpha * K_change + (1 - alpha) * K | === 1
-                #
                 # lehl@2022-06-12: Ensure that only the kernels are reduced which are also updated
                 #
                 abs_sum = torch.sum(torch.abs(K_change), dim=(-2,-1))
                 changing_kernels = abs_sum.to(torch.bool).to(torch.long).unsqueeze(-1).unsqueeze(-1)
                 unchanged_kernels = 1 - changing_kernels
 
+                # Perform Kernel Update
+                #
                 self.K *= (1 - self.alpha) * changing_kernels + unchanged_kernels
                 self.K += self.alpha * K_change
-                #print("K_change (SUM):", torch.sum(self.alpha*K_change))
-                # del K_change
+                torch.clip_(self.K, min=0, max=1)
 
+                #print("K_change (SUM):", torch.sum(self.alpha*K_change))
+                
         # =======================================================================================
         #   CALCULATE OUTPUT
         # =======================================================================================
@@ -588,7 +596,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         for b in range(batch_size):
             # lehl@2022-06-10: No need to transpose the large_K!
             #
-            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...]), padding=0) / self.num_fm
+            L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), large_K[b,...], padding=0) / self.num_fm
+            # L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...]), padding=0) / self.num_fm
 
         output = torch.sum(L.reshape((batch_size, self.n, self.num_fm, L.shape[-2], L.shape[-1])), dim=1)
 
