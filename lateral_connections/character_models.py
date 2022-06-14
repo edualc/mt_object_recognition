@@ -488,6 +488,7 @@ class VGGReconstructionLCL(nn.Module):
 
                     if test_loader:
                         test_acc, test_loss = self.test(test_loader)
+                        self.train()
                         log_dict['test_acc'] = test_acc
                         log_dict['test_loss'] = test_loss
 
@@ -535,6 +536,61 @@ class VGGReconstructionLCL(nn.Module):
         acc = correct / total
 
         return acc, total_loss
+
+
+class VggFull(VGGReconstructionLCL):
+    def __init__(self, vgg, learning_rate=3e-4, run_identifier=""):
+        super(VGGReconstructionLCL, self).__init__()
+
+        self.vgg = vgg
+        self.num_classes = self.vgg.num_classes
+        self.device = self.vgg.device
+
+        self.run_identifier = run_identifier
+        self.learning_rate = learning_rate
+
+        self._reconstruct_from_vgg()
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
+
+
+    def _reconstruct_from_vgg(self):
+        pooling_sizes = {
+            'channels': { 1: 64, 2: 128, 3: 256, 4: 512, 5: 512 },
+            'width': { 1: 56, 2: 28, 3: 14, 4: 7, 5: 7 },
+            'height': { 1: 56, 2: 28, 3: 14, 4: 7, 5: 7 },
+        }
+
+        self.features = self.vgg.features
+
+        for param in self.features.parameters():
+            param.requires_grad = False
+
+        self.maxpool = nn.AdaptiveAvgPool2d((7, 7))
+        self.classifier = nn.Sequential(
+            nn.Linear(512*7*7, 4096),
+            nn.ReLU(True),
+            nn.Linear(4096, 4096),
+            nn.ReLU(True),
+            nn.Linear(4096, self.num_classes)
+        )
+
+        # Delete the pretrained "full" VGG19, since we're only
+        # interested in using it a pretraining for earlier layers
+        #
+        del self.vgg
+        self.to(self.device)
+    
+    def forward(self, x):
+        x = self.features(x)
+        # x = self.avgpool(x)
+        x = self.maxpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
+
+
 
 
 # GPU Performance Blogpost:
