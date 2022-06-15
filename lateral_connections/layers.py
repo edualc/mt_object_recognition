@@ -78,7 +78,6 @@ class LaterallyConnectedLayer(nn.Module):
         
         # lehl@022-06-14: Set self connections to zero
         diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item()).repeat(self.n, self.n)
-        diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n))
         K *= diagonal_repetition_mask.unsqueeze(-1).unsqueeze(-1)
         self.register_parameter('K', torch.nn.Parameter(K, requires_grad=False))
         del K
