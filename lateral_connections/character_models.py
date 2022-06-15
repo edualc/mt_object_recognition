@@ -173,6 +173,7 @@ class VggWithLCL(nn.Module):
 
                     if test_loader:
                         test_acc, test_loss = self.test(test_loader)
+                        self.train()
                         log_dict['test_acc'] = test_acc
                         log_dict['test_loss'] = test_loss
 
@@ -304,6 +305,12 @@ class VGGReconstructionLCL(nn.Module):
 
         self._reconstruct_from_vgg()
 
+        # Delete the pretrained "full" VGG19, since we're only
+        # interested in using it a pretraining for earlier layers
+        #
+        del self.vgg
+        self.to(self.device)
+
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = optim.SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=0.0005)
         # self.optimizer = optim.Adam(self.parameters(), lr=self.learning_rate)
@@ -423,12 +430,6 @@ class VGGReconstructionLCL(nn.Module):
                 nn.Linear(fc_layer_output_size, self.num_classes)
             )
 
-        # Delete the pretrained "full" VGG19, since we're only
-        # interested in using it a pretraining for earlier layers
-        #
-        del self.vgg
-        self.to(self.device)
-
     def save(self, path):
         torch.save(self.state_dict(), path)
 
@@ -488,6 +489,7 @@ class VGGReconstructionLCL(nn.Module):
 
                     if test_loader:
                         test_acc, test_loss = self.test(test_loader)
+                        self.train()
                         log_dict['test_acc'] = test_acc
                         log_dict['test_loss'] = test_loss
 
@@ -589,6 +591,148 @@ class VggFull(VGGReconstructionLCL):
         x = self.classifier(x)
         return x
 
+
+
+# class TinyLateralNet(nn.Module):
+#     def __init__(self):
+#         super(TinyLateralNet, self).__init__()
+
+#     def forward(self, x):
+#         pass
+
+#     def train_with_loader(self, loader, val_loader):
+#         pass
+
+
+class TinyCNN(nn.Module):
+    def __init__(self, conv_channels=10, num_classes=10, learning_rate=3e-4, run_identifier=''):
+        super(TinyCNN, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.run_identifier = run_identifier
+
+        self.conv = nn.Conv2d(in_channels=1, out_channels=conv_channels, padding=1, kernel_size=(3,3))
+        self.conv_act = nn.Tanh()
+        self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
+        # self.lcl
+
+        self.fc1 = nn.Linear(in_features=conv_channels*14*14, out_features=100)
+        self.fc1_act = nn.ReLU()
+        self.fc2 = nn.Linear(in_features=100, out_features=num_classes)
+
+        self.to(self.device)
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+    def save(self, path):
+        torch.save(self.state_dict(), path)
+
+    def load(self, path):
+        self.load_state_dict(torch.load(path))
+        self.eval()
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.conv_act(x)
+        x = self.maxpool(x)
+        x = torch.flatten(x, 1)
+
+        x = self.fc1(x)
+        x = self.fc1_act(x)
+        return self.fc2(x)
+
+    def train_with_loader(self, train_loader, val_loader, test_loader=None, num_epochs=5):
+        for epoch in range(num_epochs):
+            print(f"[INFO]: Epoch {epoch} of {num_epochs}")
+            self.train()
+
+            correct = 0
+            total = 0
+            total_loss = 0
+            counter = 0
+
+            agg_correct = 0
+            agg_total = 0
+            agg_loss = 0
+
+            # Training Loop
+            for i, (images, labels) in tqdm(enumerate(train_loader, 0), total=len(train_loader), desc='Training'):
+                counter += 1
+                
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                outputs = self(images)
+                loss = self.loss_fn(outputs, labels)
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                _, preds = torch.max(outputs, 1)
+        
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+                total_loss += (loss.item() / labels.size(0))
+
+                current_iteration = epoch*len(train_loader) + i
+
+                if current_iteration > 0 and (current_iteration % 1250) == 0:
+                    self.save(f"models/tiny_cnn/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
+                    val_acc, val_loss = self.test(val_loader)
+                    self.train()
+                    log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
+
+                    if test_loader:
+                        test_acc, test_loss = self.test(test_loader)
+                        self.train()
+                        log_dict['test_acc'] = test_acc
+                        log_dict['test_loss'] = test_loss
+
+                    wandb.log(log_dict, commit=False)
+
+                if (current_iteration % 250) == 0:
+                    if i > 0:
+                        wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
+                    
+                    agg_correct += correct
+                    agg_total += total
+                    agg_loss += total_loss
+
+                    correct = 0
+                    total = 0
+                    total_loss = 0
+                    counter = 0
+
+            wandb.log({'epoch': epoch, 'iteration': current_iteration, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total})
+
+    def test(self, test_loader):
+        self.eval()
+
+        correct = 0
+        total = 0
+        total_loss = 0
+        counter = 0
+
+        # Evaluation Loop
+        for i, (images, labels) in tqdm(enumerate(test_loader, 0), total=len(test_loader), desc='Testing'):
+            counter += 1
+            images = images.to(self.device)
+            labels = labels.to(self.device)
+
+            outputs = self(images)
+            loss = self.loss_fn(outputs, labels)
+            
+            _, preds = torch.max(outputs, 1)
+    
+            correct += (preds == labels).sum().item()
+            total += labels.size(0)
+            total_loss += (loss.item() / labels.size(0))
+
+        total_loss /= counter
+        acc = correct / total
+
+        return acc, total_loss
 
 
 

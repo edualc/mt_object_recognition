@@ -21,6 +21,13 @@ CONFIGS = {
         'batch_size': 10,
         'learning_rate': 3e-4,
     },
+    'tiny_cnn': {
+        'batch_size': 10,
+        'conv_channels': 10,
+        'learning_rate': 3e-4,
+        'num_classes': 10,
+        'run_identifier': '',
+    },
     'lcl': {
         'num_classes': 10,
         'learning_rate': 1e-3,
@@ -149,6 +156,7 @@ MODEL_CLASS = {
     'vgg_full': VggFull,
     'vgg16_lcl': SmallVggWithLCL,
     'lcl': VggWithLCL,
+    'tiny_cnn': TinyCNN,
     'vgg19r_lcl': VGGReconstructionLCL,
     'vgg19r_lcl__random_k_change': VGGReconstructionLCL,
     'vgg19r_lcl__random_multiplex_selection': VGGReconstructionLCL,
@@ -181,6 +189,12 @@ def load_model_by_key(model_key, model_path=None, config=None):
         vgg.load('models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt')
         model = VggFull(vgg, learning_rate=config['learning_rate'], run_identifier="")
         del vgg
+        if model_path is not None:
+            model.load(model_path)
+        return model
+
+    elif model_key == 'tiny_cnn':
+        model = TinyCNN(conv_channels=config['conv_channels'], num_classes=config['num_classes'], learning_rate=config['learning_rate'], run_identifier=config['run_identifier'])
         if model_path is not None:
             model.load(model_path)
         return model
