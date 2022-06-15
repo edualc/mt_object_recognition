@@ -16,6 +16,11 @@ CONFIGS = {
         'lcl_eta': 0.0,
         'lcl_iota': 0.2
     },
+    'vgg_full': {
+        'num_classes': 10,
+        'batch_size': 10,
+        'learning_rate': 3e-4,
+    },
     'lcl': {
         'num_classes': 10,
         'learning_rate': 1e-3,
@@ -141,6 +146,7 @@ CONFIGS = {
 
 MODEL_CLASS = {
     'vggonly': VggWithLCL,
+    'vgg_full': VggFull,
     'vgg16_lcl': SmallVggWithLCL,
     'lcl': VggWithLCL,
     'vgg19r_lcl': VGGReconstructionLCL,
@@ -170,6 +176,15 @@ def load_model_by_key(model_key, model_path=None, config=None):
             model.load(model_path)
         return model    
 
+    elif model_key == 'vgg_full':
+        vgg = VggWithLCL(config['num_classes'], learning_rate=3e-4, dropout=0.2)
+        vgg.load('models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt')
+        model = VggFull(vgg, learning_rate=config['learning_rate'], run_identifier="")
+        del vgg
+        if model_path is not None:
+            model.load(model_path)
+        return model
+
     elif model_key == 'vgg16_lcl':
         model = SmallVggWithLCL(config['num_classes'], learning_rate=config['learning_rate'], dropout=config['dropout'],
             num_multiplex=config['num_multiplex'], do_wandb=False, run_identifier="",
@@ -191,7 +206,7 @@ def load_model_by_key(model_key, model_path=None, config=None):
         return model
 
     elif model_key in ['vgg19r_lcl', 'vgg19r_lcl__scaling', 'vgg19r_lcl__random_k_change', 'vgg19r_lcl__random_multiplex_selection', 'vgg19r_lcl__fc_only']:
-        vgg = VggWithLCL(10, learning_rate=3e-4, dropout=0.2)
+        vgg = VggWithLCL(config['num_classes'], learning_rate=3e-4, dropout=0.2)
         vgg.load('models/vgg_with_lcl/VGG19_2022-04-04_183636__it13750_e2.pt')
 
         model = VGGReconstructionLCL(vgg, learning_rate=config['learning_rate'], after_pooling=config['after_pooling'],
