@@ -1,7 +1,7 @@
 from typing import Union, List, Dict, Any, cast
 from collections import OrderedDict
 from PIL import Image
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import datetime
 
 import matplotlib.pyplot as plt
@@ -592,18 +592,6 @@ class VggFull(VGGReconstructionLCL):
         return x
 
 
-
-# class TinyLateralNet(nn.Module):
-#     def __init__(self):
-#         super(TinyLateralNet, self).__init__()
-
-#     def forward(self, x):
-#         pass
-
-#     def train_with_loader(self, loader, val_loader):
-#         pass
-
-
 class TinyCNN(nn.Module):
     def __init__(self, conv_channels=10, num_classes=10, learning_rate=3e-4, run_identifier=''):
         super(TinyCNN, self).__init__()
@@ -613,7 +601,6 @@ class TinyCNN(nn.Module):
         self.conv = nn.Conv2d(in_channels=1, out_channels=conv_channels, padding=1, kernel_size=(3,3))
         self.conv_act = nn.Tanh()
         self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
-        # self.lcl
 
         self.fc1 = nn.Linear(in_features=conv_channels*14*14, out_features=100)
         self.fc1_act = nn.ReLU()
@@ -733,6 +720,56 @@ class TinyCNN(nn.Module):
         acc = correct / total
 
         return acc, total_loss
+
+
+class TinyLateralNet(TinyCNN):
+    def __init__(self, conv_channels=10, num_classes=10, learning_rate=3e-4, run_identifier='',
+        pretrained_model=None, num_multiplex=4, lcl_distance=2, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2,
+        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
+        super(TinyLateralNet, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.run_identifier = run_identifier
+
+        self.conv = nn.Conv2d(in_channels=1, out_channels=conv_channels, padding=1, kernel_size=(3,3))
+        self.conv_act = nn.Tanh()
+        self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
+
+        self.lcl = LaterallyConnectedLayer3(num_multiplex, conv_channels, 14, 14, d=lcl_distance, prd=lcl_distance, disabled=False,
+                    alpha=lcl_alpha, eta=lcl_eta, theta=lcl_theta, iota=lcl_iota,
+                    use_scaling=use_scaling, random_k_change=random_k_change, random_multiplex_selection=random_multiplex_selection, gradient_learn_k=gradient_learn_k)
+
+        self.fc1 = nn.Linear(in_features=conv_channels*14*14, out_features=100)
+        self.fc1_act = nn.ReLU()
+        self.fc2 = nn.Linear(in_features=100, out_features=num_classes)
+
+        if pretrained_model:
+            self.transfer_cnn_weights(pretrained_model)
+
+        self.to(self.device)
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+    def transfer_cnn_weights(self, pretrained_model):
+        if type(pretrained_model) != TinyCNN:
+            return
+
+        self.conv = pretrained_model.conv
+
+        for param in self.conv.parameters():
+            param.requires_grad = False
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.conv_act(x)
+        x = self.maxpool(x)
+        x = self.lcl(x)
+        x = torch.flatten(x, 1)
+
+        x = self.fc1(x)
+        x = self.fc1_act(x)
+        return self.fc2(x)
+
 
 
 

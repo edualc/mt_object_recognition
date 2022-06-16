@@ -1,6 +1,6 @@
 import torch.nn.functional as F
 import torch.nn as nn
-
+import matplotlib.pyplot as plt
 from .torch_utils import *
 
 import wandb
@@ -27,6 +27,7 @@ class LaterallyConnectedLayer(nn.Module):
         use_scaling=True, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
+        self.plot_debug = False
         
         # Use the pyTorch internal self.training, which gets adjusted
         # by model.eval() / model.train(), to control whether updates should be done
@@ -335,27 +336,32 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             'indices': indices
         }
 
-        if self.iterations_trained % 50 == 0:
-            batch_i, source_i, target_i = indices
+        batch_i, source_i, target_i = indices
 
-            selected = torch.zeros((self.num_fm*self.n, self.num_fm*self.n))
-            selected[source_i, target_i] = 1
+        selected = torch.zeros((self.num_fm*self.n, self.num_fm*self.n))
+        selected[source_i, target_i] = 1
 
-            try:
-                self.overall_impact += torch.clone(selected)
-            except AttributeError:
-                self.overall_impact = torch.clone(selected)                
+        try:
+            self.overall_impact += torch.clone(selected)
+        except AttributeError:
+            self.overall_impact = torch.clone(selected)                
+        
+        # if self.iterations_trained % 50 == 0:
 
-            import matplotlib.pyplot as plt
+        #     import matplotlib.pyplot as plt
 
-            fig, axs = plt.subplots(1, 2)
-            axs[0].imshow(selected, vmin=0, vmax=1)
-            axs[1].imshow(self.overall_impact)
-            plt.show()
+        #     fig, axs = plt.subplots(1, 2)
+        #     axs[0].imshow(selected, vmin=0, vmax=1)
+        #     axs[1].imshow(self.overall_impact)
+        #     plt.show()
 
-
-
-            # import code; code.interact(local=dict(globals(), **locals()))
+        # print(f"K:\tMean:{torch.mean(self.K)}, Std:{torch.std(self.K)}")
+        # print('')
+        # print(torch.mean(self.K, dim=(0,1)))
+        # print('')
+        # print(torch.std(self.K, dim=(0,1)))
+        
+        # import code; code.interact(local=dict(globals(), **locals()))
 
     def forward(self, A, noise_override=None):
         if self.disabled:
@@ -400,7 +406,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             if impact.max != 0:
                 impact /= impact.max()
 
-            self.impact_raw = torch.clone(impact)
+            if self.plot_debug:
+                impact_p1 = torch.clone(impact)
 
             # =======================================================================================
             #   NOISE ADDITION
@@ -428,7 +435,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                     # noise = noise_multiplier * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
                     # impact += noise
 
-            self.after_noise = torch.clone(impact)
+            if self.plot_debug:
+                impact_p2 = torch.clone(impact)
 
             if noise_override is not None:
                 impact += noise_override
@@ -444,6 +452,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             # diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
             impact *= diagonal_repetition_mask.unsqueeze(0)
 
+            if self.plot_debug:
+                impact_p3 = torch.clone(impact)
 
             # (!!!)     lehl@2022-06-03: 
             #           TODO: Is this why it degrades?
@@ -462,6 +472,9 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
             impact *= active_multiplex_mask
 
+            if self.plot_debug:
+                impact_p4 = torch.clone(impact)
+
             # Taking a quantile threshold for each target_fm (= across source_fms)
             #
             # (!!!)     lehl@2022-06-02:
@@ -475,15 +488,21 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             # impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
             indices = torch.where(impact >= impact_threshold.unsqueeze(-1).unsqueeze(-1))
 
-            # impact_threshold = torch.quantile(impact, 0.8, dim=1)
+            # indices = torch.where(impact > torch.Tensor([0]).unsqueeze(-1).unsqueeze(-1).to(self.device))
+
+            # impact_threshold = torch.quantile(impact, 0.5, dim=1)
             # indices = torch.where(impact >= impact_threshold.unsqueeze(1))
             
-            # impact_threshold = torch.quantile(impact, 0.8, dim=2)
+            # impact_threshold = torch.quantile(impact, 0.5, dim=2)
             # indices = torch.where(impact >= impact_threshold.unsqueeze(2))
 
             large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
             selected_multiplex_mask = torch.zeros(large_K.shape, device=self.device, dtype=torch.bool)
             selected_multiplex_mask[indices] = 1.0
+
+            if self.plot_debug:
+                impact_small = torch.zeros(impact.shape)
+                impact_small[indices] = 1
 
             large_K *= selected_multiplex_mask
 
@@ -626,12 +645,52 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                             }
                         })
 
+        if self.plot_debug:
+            if self.iterations_trained % 50 == 0:
+                def plot_images(x, plot_scale=3, vmax=None):
+                    fig, axs = plt.subplots(1, x.shape[1], figsize=(plot_scale*x.shape[1], plot_scale))
+                    
+                    for i in range(x.shape[1]):
+                        if vmax is None:
+                            axs[i].imshow(x[0,i,...].cpu())
+                        else:
+                            axs[i].imshow(x[0,i,...].cpu(), vmax=vmax)
+                        axs[i].set_title(f"Pattern #{i}")
+                    plt.show()
+                    plt.close()
+
+                plot_images(A)
+                plot_images(output)
+
         # Keep track of number of training iterations
         self.iterations_trained += 1 if self.training else 0
 
         # Method to be plugged in for debugging reasons
         self.forward_debug(output, impact, A, indices)
 
+        if self.plot_debug:
+            if self.iterations_trained % 50 == 0:
+                
+                fig, axs = plt.subplots(1, 6, figsize=(3*6, 3))
+                fig.suptitle('Multiplex Selection ("Impact")')
+                axs[0].imshow(impact_p1[0].cpu())
+                axs[0].set_title('Initial Lateral Impact')
+                axs[1].imshow(impact_p2[0].cpu())
+                axs[1].set_title('Added Noise')
+                axs[2].imshow(impact_p3[0].cpu())
+                axs[2].set_title('Removed Identity References')
+                axs[3].imshow(impact_p4[0].cpu())
+                axs[3].set_title('Selected Multiplex Connections')
+                axs[4].imshow(impact_small[0].cpu())
+                axs[4].set_title('Selected Multiplex Connections')
+                axs[5].imshow(self.overall_impact.cpu())
+                axs[5].set_title('Multiplex Choice Hist. (overall)')
+                for plot_idx in range(6):
+                    axs[plot_idx].set_ylabel('Source FM')
+                    axs[plot_idx].set_xlabel('Target FM')
+                plt.tight_layout()
+                plt.show()
+                plt.close()
 
         return output
 
