@@ -449,7 +449,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             #
             diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item(), device=self.device).repeat(self.n, self.n)
             # lehl@2022-06-09: TODO: Reenable self-connection?
-            # diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
+            diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n), device=self.device)
             impact *= diagonal_repetition_mask.unsqueeze(0)
 
             if self.plot_debug:
