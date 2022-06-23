@@ -27,7 +27,7 @@ class LaterallyConnectedLayer(nn.Module):
         use_scaling=True, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
-        self.plot_debug = False
+        self.plot_debug = True
         
         # Use the pyTorch internal self.training, which gets adjusted
         # by model.eval() / model.train(), to control whether updates should be done
@@ -77,8 +77,8 @@ class LaterallyConnectedLayer(nn.Module):
         # K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
         K = torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k))
         
-        # lehl@022-06-14: Set self connections to zero
         diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item()).repeat(self.n, self.n)
+        diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n))
         K *= diagonal_repetition_mask.unsqueeze(-1).unsqueeze(-1)
         self.register_parameter('K', torch.nn.Parameter(K, requires_grad=False))
         del K
@@ -455,10 +455,9 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             if self.plot_debug:
                 impact_p3 = torch.clone(impact)
 
-            # (!!!)     lehl@2022-06-03: 
-            #           TODO: Is this why it degrades?
-            #
-            # Select the highest active multiplex cell and disable others
+            # Select the highest active multiplex (SOURCE) cells and disable others,
+            # ensuring that only the most active multiplex source cell is active in
+            # any multiplex source unit
             #
             # Implementation uses the answer provided here:
             # https://discuss.pytorch.org/t/set-max-value-to-1-others-to-0/44350/8
@@ -467,34 +466,52 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             impact_reshaped = impact.reshape((batch_size, self.n, self.num_fm, self.n * self.num_fm))
 
             idx = torch.argmax(impact_reshaped, dim=1, keepdims=True)
-            active_multiplex_mask = torch.zeros_like(impact_reshaped).scatter_(1, idx, 1.)
-            active_multiplex_mask = active_multiplex_mask.reshape((batch_size, self.n*self.num_fm, self.n*self.num_fm))
+            active_multiplex_source_mask = torch.zeros_like(impact_reshaped).scatter_(1, idx, 1.)
+            active_multiplex_source_mask = active_multiplex_source_mask.reshape((batch_size, self.n*self.num_fm, self.n*self.num_fm))
 
-            impact *= active_multiplex_mask
+            impact *= active_multiplex_source_mask
 
             if self.plot_debug:
                 impact_p4 = torch.clone(impact)
 
-            # Taking a quantile threshold for each target_fm (= across source_fms)
+
+
+            # lehl@2022-06-22:
+            # Selecting the most active target source maps, similar
+            # to the selection of active source feature maps above
             #
-            # (!!!)     lehl@2022-06-02:
-            #           TODO2 - Change from 20% selection at source to 20% at target (source: dim=1, target: dim=2)
+            # [batch_size, n*F, n*F] -> [n*F, batch_size, n, F]
+            impact_reshaped = impact.transpose(0,1).reshape((self.n*self.num_fm, batch_size, self.n, self.num_fm))
+            impact_target_sum = torch.sum(impact_reshaped, dim=0)
+            idx = torch.argmax(impact_target_sum, dim=1, keepdims=True)
+            active_multiplex_target_mask = torch.zeros_like(impact_target_sum).scatter_(1, idx, 1.).reshape((batch_size, self.n*self.num_fm))
+            active_multiplex_target_mask = active_multiplex_target_mask * impact.transpose(1,0)
+            active_multiplex_target_mask = active_multiplex_target_mask.transpose(1,0)
+
+            impact *= active_multiplex_target_mask
+
+
+
+
+            if self.plot_debug:
+                impact_p5 = torch.clone(impact)
+
+            # (!!!) lehl@2022-06-22: TODO: only use a subset? top n=50%?
+            # Taking a quantile threshold for each target_fm (= across source_fms)
             #
             # threshold :th is based on the already turned off multiplex cells, i.e. only :num_fm should be available
             # but chosen from :num_fm * :n indices
             #
-            th = float(1 - (0.5 / self.n)) # (1 - top%/n)
-            impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), th, dim=1)
-            # impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
-            indices = torch.where(impact >= impact_threshold.unsqueeze(-1).unsqueeze(-1))
+            # th = float(1 - (0.5 / self.n)) # (1 - top%/n)
+            # impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), th, dim=1)
+            # # impact_threshold = torch.quantile(impact.reshape((impact.shape[0], impact.shape[1]*impact.shape[2])), 0.8, dim=1)
+            # indices = torch.where(impact >= impact_threshold.unsqueeze(-1).unsqueeze(-1))
 
-            # indices = torch.where(impact > torch.Tensor([0]).unsqueeze(-1).unsqueeze(-1).to(self.device))
 
-            # impact_threshold = torch.quantile(impact, 0.5, dim=1)
-            # indices = torch.where(impact >= impact_threshold.unsqueeze(1))
-            
-            # impact_threshold = torch.quantile(impact, 0.5, dim=2)
-            # indices = torch.where(impact >= impact_threshold.unsqueeze(2))
+            # # impact_threshold = torch.quantile(impact, 0.5, dim=1)
+            # # indices = torch.where(impact >= impact_threshold.unsqueeze(1))
+            indices = torch.where(impact > torch.Tensor([0]).unsqueeze(-1).unsqueeze(-1).to(self.device))
+
 
             large_K = self.K.repeat(batch_size, 1, 1, 1, 1)
             selected_multiplex_mask = torch.zeros(large_K.shape, device=self.device, dtype=torch.bool)
@@ -515,7 +532,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                                 'max': round(impact.max().item(), 4),
                                 'mean': round(impact.mean().item(), 4)
                             },
-                            'num_active_mlpx': torch.sum(active_multiplex_mask) / batch_size,
+                            'num_active_mlpx': torch.sum(active_multiplex_source_mask) / batch_size,
                             'num_selected_mlpx': torch.sum(selected_multiplex_mask[...,0,0]) / batch_size,
                             'multiplex_selection': torch.sum(selected_multiplex_mask[...,0,0], dim=(0,2))/batch_size
                         }
@@ -652,9 +669,9 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                     
                     for i in range(x.shape[1]):
                         if vmax is None:
-                            axs[i].imshow(x[0,i,...].cpu())
+                            axs[i].imshow(x[0,i,...].cpu().detach())
                         else:
-                            axs[i].imshow(x[0,i,...].cpu(), vmax=vmax)
+                            axs[i].imshow(x[0,i,...].cpu().detach(), vmax=vmax)
                         axs[i].set_title(f"Pattern #{i}")
                     plt.show()
                     plt.close()
@@ -671,26 +688,33 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         if self.plot_debug:
             if self.iterations_trained % 50 == 0:
                 
-                fig, axs = plt.subplots(1, 6, figsize=(3*6, 3))
+                fig, axs = plt.subplots(1, 7, figsize=(3*7, 3))
                 fig.suptitle('Multiplex Selection ("Impact")')
-                axs[0].imshow(impact_p1[0].cpu())
+                axs[0].imshow(impact_p1[0].cpu().detach())
                 axs[0].set_title('Initial Lateral Impact')
-                axs[1].imshow(impact_p2[0].cpu())
+                axs[1].imshow(impact_p2[0].cpu().detach())
                 axs[1].set_title('Added Noise')
-                axs[2].imshow(impact_p3[0].cpu())
+                axs[2].imshow(impact_p3[0].cpu().detach())
                 axs[2].set_title('Removed Identity References')
-                axs[3].imshow(impact_p4[0].cpu())
-                axs[3].set_title('Selected Multiplex Connections')
-                axs[4].imshow(impact_small[0].cpu())
-                axs[4].set_title('Selected Multiplex Connections')
-                axs[5].imshow(self.overall_impact.cpu())
-                axs[5].set_title('Multiplex Choice Hist. (overall)')
-                for plot_idx in range(6):
+                axs[3].imshow(impact_p4[0].cpu().detach())
+                axs[3].set_title('Selected Active Source FMs')
+                axs[4].imshow(impact_p5[0].cpu().detach())
+                axs[4].set_title('Selected Active Target FMs')
+                axs[5].imshow(impact_small[0].cpu().detach())
+                axs[5].set_title('Selected Multiplex Connections')
+                axs[6].imshow(self.overall_impact.cpu().detach())
+                axs[6].set_title('Multiplex Choice Hist. (overall)')
+                for plot_idx in range(7):
                     axs[plot_idx].set_ylabel('Source FM')
                     axs[plot_idx].set_xlabel('Target FM')
                 plt.tight_layout()
                 plt.show()
                 plt.close()
+
+                #print(torch.sum(impact_p5[0].cpu().detach(), dim=0).to(torch.bool).to(torch.int))
+
+                # import code; code.interact(local=dict(globals(), **locals()))
+
 
         return output
 
