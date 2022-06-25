@@ -27,7 +27,7 @@ def load_mnistc(dirname=None, train=False):
 def load_mnist(train=False):
     return MNIST('images/mnist/', train=train, transform=image_transform(), download=True)
 
-def get_loaders(batch_size, corruption='line'):
+def get_loaders(batch_size, corruption='gaussian_noise'):
     dataset = load_mnist(train=True)
     train_size = 50000
     eval_size = len(dataset) - train_size

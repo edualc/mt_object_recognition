@@ -76,7 +76,7 @@ class LaterallyConnectedLayer(nn.Module):
         # K = torch.zeros((self.n*self.num_fm, self.n*self.num_fm, self.k, self.k))
         # K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
         K = torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k))
-        
+
         diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item()).repeat(self.n, self.n)
         diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n))
         K *= diagonal_repetition_mask.unsqueeze(-1).unsqueeze(-1)
@@ -100,6 +100,8 @@ class LaterallyConnectedLayer(nn.Module):
         return f"{self.__class__.__name__}({self.n.item()}, ({self.num_fm.item()}, {self.fm_height.item()}, {self.fm_width.item()}), d={str(self.d.item())}, disabled={str(self.disabled)}, update={str(self.training)})"
 
     def pad_activations(self, A):
+        if self.prd == 0:
+            return torch.clone(A)
         padded_A = torch.zeros(A.shape[:-2] + (self.prd+self.d+A.shape[-2], self.prd+self.d+A.shape[-1]), dtype=A.dtype, device=self.device)
         padded_A[..., self.prd:-self.prd, self.prd:-self.prd] = A
         return padded_A
@@ -403,7 +405,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             # to ensure the noise is proportional in size
             #
             impact -= impact.min()
-            if impact.max != 0:
+            if impact.max() != 0:
                 impact /= impact.max()
 
             if self.plot_debug:
@@ -601,7 +603,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 # lehl@2022-06-14: Normalization down to [0, 1] range for K_change
                 # (and subsequently the kernel itself)
                 #
-                K_change /= self.K.shape[-2] * self.K.shape[-1]
+                K_change /= self.A.shape[-2] * self.A.shape[-1]
                 
                 # lehl@2022-06-12: Ensure that only the kernels are reduced which are also updated
                 #
@@ -613,6 +615,7 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 #
                 self.K *= (1 - self.alpha) * changing_kernels + unchanged_kernels
                 self.K += self.alpha * K_change
+
                 torch.clip_(self.K, min=0, max=1)
 
                 #print("K_change (SUM):", torch.sum(self.alpha*K_change))

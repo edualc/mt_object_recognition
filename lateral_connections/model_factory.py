@@ -41,6 +41,19 @@ CONFIGS = {
         'num_classes': 10,
         'run_identifier': '',
     },
+    'tiny_lateral_net_before_pooling': {
+        'num_multiplex': 4,
+        'lcl_distance': 2,
+        'lcl_alpha': 1e-3,
+        'lcl_theta': 0.2,
+        'lcl_eta': 0.0,
+        'lcl_iota': 0.2,
+        'batch_size': 10,
+        'conv_channels': 10,
+        'learning_rate': 3e-4,
+        'num_classes': 10,
+        'run_identifier': '',
+    },
     'lcl': {
         'num_classes': 10,
         'learning_rate': 1e-3,
@@ -214,6 +227,14 @@ def load_model_by_key(model_key, model_path=None, config=None):
 
     elif model_key == 'tiny_lateral_net':
         model = TinyLateralNet(conv_channels=config['conv_channels'], num_classes=config['num_classes'],
+            learning_rate=config['learning_rate'], run_identifier=config['run_identifier'], num_multiplex=config['num_multiplex'],
+            lcl_distance=config['lcl_distance'], lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
+        if model_path is not None:
+            model.load(model_path)
+        return model
+
+    elif model_key == 'tiny_lateral_net_before_pooling':
+        model = TinyLateralNetBeforePooling(conv_channels=config['conv_channels'], num_classes=config['num_classes'],
             learning_rate=config['learning_rate'], run_identifier=config['run_identifier'], num_multiplex=config['num_multiplex'],
             lcl_distance=config['lcl_distance'], lcl_alpha=config['lcl_alpha'], lcl_eta=config['lcl_eta'], lcl_theta=config['lcl_theta'], lcl_iota=config['lcl_iota'])
         if model_path is not None:

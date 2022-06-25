@@ -17,6 +17,7 @@ from torchvision.models.vgg import VGG
 import wandb
 
 from .layers import LaterallyConnectedLayer, LaterallyConnectedLayer3
+from .torch_utils import *
 
 
 # Taken from https://pytorch.org/vision/main/_modules/torchvision/models/vgg.html#vgg19
@@ -676,12 +677,13 @@ class TinyCNN(nn.Module):
                         log_dict['test_acc'] = test_acc
                         log_dict['test_loss'] = test_loss
 
-                    wandb.log(log_dict, commit=False)
+                    print(log_dict) if wandb.run.disabled else wandb.log(wandb_dict, commit=False)
 
                 if (current_iteration % 250) == 0:
                     if i > 0:
-                        wandb.log({ 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration })
-                    
+                        wandb_dict = { 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration }
+                        print(wandb_dict) if wandb.run.disabled else wandb.log(wandb_dict)
+
                     agg_correct += correct
                     agg_total += total
                     agg_loss += total_loss
@@ -691,7 +693,10 @@ class TinyCNN(nn.Module):
                     total_loss = 0
                     counter = 0
 
-            wandb.log({'epoch': epoch, 'iteration': current_iteration, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total})
+
+            wandb_dict = {'epoch': epoch, 'iteration': current_iteration, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total}
+            print(wandb_dict) if wandb.run.disabled else wandb.log(wandb_dict)
+
 
     def test(self, test_loader):
         self.eval()
@@ -763,7 +768,66 @@ class TinyLateralNet(TinyCNN):
         x = self.conv(x)
         x = self.conv_act(x)
         x = self.maxpool(x)
+
+        # remove border effect
+        x = symmetric_padding(x, prd=1)
+
         x = self.lcl(x)
+        x = torch.flatten(x, 1)
+
+        x = self.fc1(x)
+        x = self.fc1_act(x)
+        return self.fc2(x)
+
+class TinyLateralNetBeforePooling(TinyCNN):
+    def __init__(self, conv_channels=10, num_classes=10, learning_rate=3e-4, run_identifier='',
+        pretrained_model=None, num_multiplex=4, lcl_distance=2, lcl_alpha=1e-3, lcl_eta=0.0, lcl_theta=0.2, lcl_iota=0.2,
+        use_scaling=False, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
+        super(TinyLateralNetBeforePooling, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.run_identifier = run_identifier
+
+        self.conv = nn.Conv2d(in_channels=1, out_channels=conv_channels, padding=1, kernel_size=(3,3))
+        self.conv_act = nn.Tanh()
+
+        self.lcl = LaterallyConnectedLayer3(num_multiplex, conv_channels, 28, 28, d=lcl_distance, prd=lcl_distance, disabled=False,
+                    alpha=lcl_alpha, eta=lcl_eta, theta=lcl_theta, iota=lcl_iota,
+                    use_scaling=use_scaling, random_k_change=random_k_change, random_multiplex_selection=random_multiplex_selection, gradient_learn_k=gradient_learn_k)
+        
+        self.maxpool = nn.AdaptiveMaxPool2d((14, 14))
+
+        self.fc1 = nn.Linear(in_features=conv_channels*14*14, out_features=100)
+        self.fc1_act = nn.ReLU()
+        self.fc2 = nn.Linear(in_features=100, out_features=num_classes)
+
+        if pretrained_model:
+            self.transfer_cnn_weights(pretrained_model)
+
+        self.to(self.device)
+
+        self.loss_fn = nn.CrossEntropyLoss()
+        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+    def transfer_cnn_weights(self, pretrained_model):
+        if type(pretrained_model) != TinyCNN:
+            return
+
+        self.conv = pretrained_model.conv
+
+        for param in self.conv.parameters():
+            param.requires_grad = False
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.conv_act(x)
+
+        # remove border effect
+        x = symmetric_padding(x, prd=1)
+
+        x = self.lcl(x)
+
+        x = self.maxpool(x)
+
         x = torch.flatten(x, 1)
 
         x = self.fc1(x)
