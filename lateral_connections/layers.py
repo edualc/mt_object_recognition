@@ -23,11 +23,11 @@ import wandb
 #
 class LaterallyConnectedLayer(nn.Module):
     def __init__(self, n, num_fm, fm_height, fm_width, d=2, prd=2, disabled=True, update=True,
-        alpha=0.1, beta=0.001, gamma=0.001, eta=1, theta=0.0, iota=0.1, mu_batch_size=0, num_noisy_iterations=1000,
+        alpha=0.1, beta=0.001, gamma=0.001, eta=1, theta=0.0, iota=0.1, mu_batch_size=0, num_noisy_iterations=5000,
         use_scaling=True, random_k_change=False, random_multiplex_selection=False, gradient_learn_k=False):
         super().__init__()
         self.disabled = disabled
-        self.plot_debug = True
+        self.plot_debug = False
         
         # Use the pyTorch internal self.training, which gets adjusted
         # by model.eval() / model.train(), to control whether updates should be done
@@ -75,7 +75,7 @@ class LaterallyConnectedLayer(nn.Module):
         # avoid over- and underflow issues by rounding to 0 or infinity for small/large exponentials
         # K = torch.zeros((self.n*self.num_fm, self.n*self.num_fm, self.k, self.k))
         # K = softmax_on_fm(torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k)))
-        K = torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k))
+        K = 0.02 * torch.rand(size=(self.n * self.num_fm, self.n * self.num_fm, self.k, self.k))
 
         diagonal_repetition_mask = 1 - torch.eye(self.num_fm.item()).repeat(self.n, self.n)
         diagonal_repetition_mask += torch.eye(int(self.num_fm*self.n))
@@ -92,9 +92,10 @@ class LaterallyConnectedLayer(nn.Module):
         # Initialization of S, M and mu, saving the scaling factor of each
         # lateral connection and its historical average
         # TODO: Initialize with a sensible mean, taken from a sample of activations
-        self.register_parameter('mu', torch.nn.Parameter(torch.ones((self.n * self.num_fm,)) * 0.2, requires_grad=False))
-        self.register_parameter('S', torch.nn.Parameter(torch.ones(self.mu.shape), requires_grad=False))
-        self.register_parameter('M', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
+        if self.use_scaling:
+            self.register_parameter('mu', torch.nn.Parameter(torch.ones((self.n * self.num_fm,)) * 0.2, requires_grad=False))
+            self.register_parameter('S', torch.nn.Parameter(torch.ones(self.mu.shape), requires_grad=False))
+            self.register_parameter('M', torch.nn.Parameter(torch.clone(self.mu), requires_grad=False))
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.n.item()}, ({self.num_fm.item()}, {self.fm_height.item()}, {self.fm_width.item()}), d={str(self.d.item())}, disabled={str(self.disabled)}, update={str(self.training)})"
@@ -339,7 +340,6 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         }
 
         batch_i, source_i, target_i = indices
-
         selected = torch.zeros((self.num_fm*self.n, self.num_fm*self.n))
         selected[source_i, target_i] = 1
 
@@ -348,23 +348,6 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
         except AttributeError:
             self.overall_impact = torch.clone(selected)                
         
-        # if self.iterations_trained % 50 == 0:
-
-        #     import matplotlib.pyplot as plt
-
-        #     fig, axs = plt.subplots(1, 2)
-        #     axs[0].imshow(selected, vmin=0, vmax=1)
-        #     axs[1].imshow(self.overall_impact)
-        #     plt.show()
-
-        # print(f"K:\tMean:{torch.mean(self.K)}, Std:{torch.std(self.K)}")
-        # print('')
-        # print(torch.mean(self.K, dim=(0,1)))
-        # print('')
-        # print(torch.std(self.K, dim=(0,1)))
-        
-        # import code; code.interact(local=dict(globals(), **locals()))
-
     def forward(self, A, noise_override=None):
         if self.disabled:
             return torch.clone(A)
@@ -420,22 +403,25 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 # enough and should --- after some initial training --- be turned off
                 #
                 if self.iterations_trained < self.num_noisy_iterations:
+                    noise_multiplier = 1
 
+                    # Gradually remove the noise over time
+                    #
+                    if self.iterations_trained > self.num_noisy_iterations // 2:
+                        noise_multiplier = (self.num_noisy_iterations - self.iterations_trained) / (self.num_noisy_iterations // 2)
 
-                    impact += self.eta * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
+                    # Add noise to help break the symmetry between initially
+                    # identical multiplex cells
+                    #
+                    noise = noise_multiplier * self.eta * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
+                    impact += noise
 
-                    # noise_multiplier = 1
-
-                    # # Gradually remove the noise over time
-                    # #
-                    # if self.iterations_trained > self.num_noisy_iterations // 2:
-                    #     noise_multiplier = (self.num_noisy_iterations - self.iterations_trained) / (self.num_noisy_iterations // 2)
-
-                    # # Add noise to help break the symmetry between initially
-                    # # identical multiplex cells
-                    # #
-                    # noise = noise_multiplier * torch.normal(torch.zeros(impact.shape), torch.ones(impact.shape)).to(self.device)
-                    # impact += noise
+                    wandb.log({
+                        'lcl': {
+                            'noise_multiplier': noise_multiplier,
+                            'iteration': self.iterations_trained
+                        }
+                    })
 
             if self.plot_debug:
                 impact_p2 = torch.clone(impact)
@@ -494,7 +480,6 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
 
 
-
             if self.plot_debug:
                 impact_p5 = torch.clone(impact)
 
@@ -532,11 +517,10 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                             'impact': {
                                 'min': round(impact.min().item(), 4),
                                 'max': round(impact.max().item(), 4),
-                                'mean': round(impact.mean().item(), 4)
+                                'mean': round(impact.mean().item(), 4),
+                                'std': round(impact.std().item(), 4)
                             },
-                            'num_active_mlpx': torch.sum(active_multiplex_source_mask) / batch_size,
-                            'num_selected_mlpx': torch.sum(selected_multiplex_mask[...,0,0]) / batch_size,
-                            'multiplex_selection': torch.sum(selected_multiplex_mask[...,0,0], dim=(0,2))/batch_size
+                            'iteration': self.iterations_trained
                         }
                     })
 
@@ -603,8 +587,15 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                 # lehl@2022-06-14: Normalization down to [0, 1] range for K_change
                 # (and subsequently the kernel itself)
                 #
+                # Normalization by size of kernel
+                #
                 K_change /= self.A.shape[-2] * self.A.shape[-1]
                 
+                # Normalization by maximum possible values
+                # (empirically added to match output of Conv(torch.ones, torch.ones))
+                #
+                K_change /= ((self.A.shape[-2]/K_change.shape[-2]) * (self.A.shape[-1]/K_change.shape[-1]))
+
                 # lehl@2022-06-12: Ensure that only the kernels are reduced which are also updated
                 #
                 abs_sum = torch.sum(torch.abs(K_change), dim=(-2,-1))
@@ -618,7 +609,30 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
 
                 torch.clip_(self.K, min=0, max=1)
 
-                #print("K_change (SUM):", torch.sum(self.alpha*K_change))
+                if not wandb.run.disabled:
+                    if (self.iterations_trained % 50) == 0:
+                        # only look at the kernels that are actually changed (=nonzero)
+                        Kr = K_change.reshape((K_change.shape[0]*K_change.shape[1], K_change.shape[2]*K_change.shape[3]))
+                        Kr_sum = torch.sum(Kr, dim=1)
+                        K_filtered = Kr[Kr_sum>0, :]
+
+                        wandb.log({
+                            'lcl': {
+                                'K_change': {
+                                    'min': round(K_filtered.min().item(), 4),
+                                    'max': round(K_filtered.max().item(), 4),
+                                    'mean': round(K_filtered.mean().item(), 4),
+                                    'std': round(K_filtered.std().item(), 4)
+                                },
+                                'K': {
+                                    'min': round(self.K.min().item(), 4),
+                                    'max': round(self.K.max().item(), 4),
+                                    'mean': round(self.K.mean().item(), 4),
+                                    'std': round(self.K.std().item(), 4)
+                                },
+                                'iteration': self.iterations_trained
+                            },
+                        })
                 
         # =======================================================================================
         #   CALCULATE OUTPUT
@@ -638,6 +652,15 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
             # L[b, ...] = F.conv2d(padded_A[b, ...].unsqueeze(0), minmax_on_fm(large_K[b,...]), padding=0) / self.num_fm
 
         output = torch.sum(L.reshape((batch_size, self.n, self.num_fm, L.shape[-2], L.shape[-1])), dim=1)
+
+        # lehl@2022-06-26: Empirical multiplier to increase the output
+        # back to a similar mean level compared to its input
+        #
+        mean_input = torch.mean(A)
+        mean_output = torch.mean(output)
+
+        output *= mean_input / mean_output
+
 
         # =======================================================================================
         #   UPDATE SCALING / MEAN ACTIVITY
@@ -661,7 +684,8 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                         wandb.log({
                             'lcl': {
                                 'S': self.S.data.cpu().numpy(),
-                                'M': self.M.data.cpu().numpy()
+                                'M': self.M.data.cpu().numpy(),
+                                'iteration': self.iterations_trained
                             }
                         })
 
@@ -712,12 +736,42 @@ class LaterallyConnectedLayer3(LaterallyConnectedLayer):
                     axs[plot_idx].set_xlabel('Target FM')
                 plt.tight_layout()
                 plt.show()
-                plt.close()
+
+                fig2, ax = plt.subplots()
+                ax.imshow(self.overall_impact.cpu().detach())
+                wandb.log({
+                    'lcl': {
+                        'debug_plot': fig,
+                        'multiplex_selection_history': fig2,
+                        'iteration': self.iterations_trained
+                    }
+                })
+                plt.close(fig)
+                plt.close(fig2)
 
                 #print(torch.sum(impact_p5[0].cpu().detach(), dim=0).to(torch.bool).to(torch.int))
 
                 # import code; code.interact(local=dict(globals(), **locals()))
 
+        if not wandb.run.disabled:
+            if (self.iterations_trained % 50) == 0:
+                wandb.log({
+                    'lcl': {
+                        'input': {
+                            'min': round(A.min().item(), 4),
+                            'max': round(A.max().item(), 4),
+                            'mean': round(A.mean().item(), 4),
+                            'std': round(A.std().item(), 4)
+                        },
+                        'output': {
+                            'min': round(output.min().item(), 4),
+                            'max': round(output.max().item(), 4),
+                            'mean': round(output.mean().item(), 4),
+                            'std': round(output.std().item(), 4)
+                        },
+                        'iteration': self.iterations_trained
+                    },
+                })
 
         return output
 

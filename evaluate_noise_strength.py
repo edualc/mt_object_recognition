@@ -75,7 +75,7 @@ def main(args):
     plt.ylabel('Percentage of swapped multiplex cells')
     plt.tight_layout()
     model_type = 'tinyCNN' if args.tiny else 'VGG19'
-    plt.savefig('noise_strength__' + model_type +'.png')
+    plt.savefig(f'noise_strength__{model_type}__d{args.lcl_distance}__n{args.num_multiplex}.png')
     plt.close()
 
 

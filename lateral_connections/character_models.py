@@ -5,6 +5,7 @@ from tqdm.auto import tqdm
 import datetime
 
 import matplotlib.pyplot as plt
+import math
 
 import torch
 import torch.nn as nn
@@ -15,9 +16,13 @@ import torchvision.transforms as transforms
 from torchvision.models.vgg import VGG
 
 import wandb
+import optuna
 
 from .layers import LaterallyConnectedLayer, LaterallyConnectedLayer3
 from .torch_utils import *
+
+EARLY_STOPPING_LIMIT = 3
+
 
 
 # Taken from https://pytorch.org/vision/main/_modules/torchvision/models/vgg.html#vgg19
@@ -282,6 +287,8 @@ class VGGReconstructionLCL(nn.Module):
         self.device = self.vgg.device
 
         self.run_identifier = run_identifier
+        self.no_improvement_count = 0
+        self.best_val_loss = 1000000
 
         self.after_pooling = after_pooling
         self.learning_rate = learning_rate
@@ -483,18 +490,28 @@ class VGGReconstructionLCL(nn.Module):
                 current_iteration = epoch*len(train_loader) + i
 
                 if current_iteration > 0 and (current_iteration % 1250) == 0:
-                    self.save(f"models/vgg_reconstructed_lcl/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
                     val_acc, val_loss = self.test(val_loader)
                     self.train()
-                    log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
+                    wandb_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
 
                     if test_loader:
                         test_acc, test_loss = self.test(test_loader)
                         self.train()
-                        log_dict['test_acc'] = test_acc
-                        log_dict['test_loss'] = test_loss
+                        wandb_dict['test_acc'] = test_acc
+                        wandb_dict['test_loss'] = test_loss
 
-                    wandb.log(log_dict, commit=False)
+                    wandb.log(wandb_dict)
+
+                    # Save best model
+                    if val_loss < self.best_val_loss:
+                        self.no_improvement_count = 0
+                        self.best_val_loss = val_loss
+                        self.save(f"models/vgg_reconstructed_lcl/{self.run_identifier}__best.pt")
+                    else:
+                        self.no_improvement_count += 1
+                        if self.no_improvement_count == EARLY_STOPPING_LIMIT:
+                            print('No improvements for 3 epochs, stopping training here.')
+                            return
 
                 if (current_iteration % 250) == 0:
                     if i > 0:
@@ -538,6 +555,137 @@ class VGGReconstructionLCL(nn.Module):
         acc = correct / total
 
         return acc, total_loss
+
+
+class VGGReconstructionLCL_FineTune(VGGReconstructionLCL):
+    # lehl@2022-04-17: Replacement of Convnet/FC layers after LCL through only new FC layers,
+    # where the number of parameters is changed such that the majority of parameters lie in the LCL
+    # (and thus roughly equal numbers of parameters are used between VGG19 and the reconstruction)
+    #
+    def _reconstruct_from_vgg(self):
+        pooling_sizes = {
+            'channels': { 1: 64, 2: 128, 3: 256, 4: 512, 5: 512 },
+            'width': { 1: 56, 2: 28, 3: 14, 4: 7, 5: 7 },
+            'height': { 1: 56, 2: 28, 3: 14, 4: 7, 5: 7 },
+        }
+
+        # The LCL kernel is proportional sized to the number of feature maps/channels (C),
+        # the number of multiplex cells (M) and the size of the filter kernels (k) - and
+        # to all of those three parameters *squared*
+        #
+        def lcl_num_parameters(pooling_layer):
+            C = pooling_sizes['channels'][pooling_layer]
+            M = self.num_multiplex
+            k = 2 * self.lcl_distance + 1
+            return C**2 * M**2 * k**2
+
+        def sizes_for_pooling_layer(pooling_layer):
+            nC = pooling_sizes['channels'][pooling_layer]
+            nH = pooling_sizes['height'][pooling_layer]
+            nW = pooling_sizes['width'][pooling_layer]
+            return nH, nW, nC
+
+        def fc_input_size(pooling_layer):
+            nH, nW, nC = sizes_for_pooling_layer(pooling_layer)
+            return nH * nW * nC
+
+        def fc_size(pooling_layer, num_vgg_params=139611210, num_vgg_params_without_fc=20024384):
+            num_lcl_params = lcl_num_parameters(pooling_layer)
+            params_remaining = num_vgg_params - num_lcl_params - num_vgg_params_without_fc
+            f_in = fc_input_size(pooling_layer)
+            
+            # lehl@2022-06-28: Calculates the remaining parameters for two equally sizes fully
+            # connected layers and an output layer of size 10. assumes we have the number of
+            # remaining parameters "r" (=params_remaining) and the size of the input "f" (=f_in),
+            # then the FC layers have size r_fc = f*x+f+x*x+x+x*10+10 (weights & biases)
+            #
+            # solving with wolframalpha gives:
+            # x = 0.5 * ( sqrt( f^2 + 18f + 4r + 81 ) - f - 11 )
+            #
+            # see https://www.wolframalpha.com/input?i=r+%3D+f*x%2Bf%2Bx*x%2Bx%2Bx*10%2B10%2C+solve+for+x
+            #
+            result = int(0.5 * (math.sqrt(f_in**2+18*f_in+4*params_remaining+81) - f_in - 11))
+
+            if result <= 0:
+                raise ArgumentError(f'LCL: Not enough parameters remaining for FC layers: #LCL: {num_lcl_params}, remaining: {params_remaining}')
+
+            return result
+
+        if self.use_new_lcl:
+            lcl_class = LaterallyConnectedLayer3
+        else:
+            lcl_class = LaterallyConnectedLayer
+
+        if self.after_pooling == 1:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1)))
+            lcl_layer = lcl_class(self.num_multiplex, 64, 112, 112, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
+                    use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
+
+        elif self.after_pooling == 2:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2)))
+            lcl_layer = lcl_class(self.num_multiplex, 128, 56, 56, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
+                    use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
+
+        elif self.after_pooling == 3:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3)))
+            lcl_layer = lcl_class(self.num_multiplex, 256, 28, 28, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
+                    use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
+
+        elif self.after_pooling == 4:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4)))
+            lcl_layer = lcl_class(self.num_multiplex, 512, 14, 14, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
+                    use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
+
+        elif self.after_pooling == 5:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4) + list(self.vgg.features.pool5)))
+            lcl_layer = lcl_class(self.num_multiplex, 512, 7, 7, d=self.lcl_distance, prd=self.lcl_distance, disabled=False,
+                    alpha=self.lcl_alpha, eta=self.lcl_eta, theta=self.lcl_theta, iota=self.lcl_iota,
+                    use_scaling=self.use_scaling, random_k_change=self.random_k_change, random_multiplex_selection=self.random_multiplex_selection, gradient_learn_k=self.gradient_learn_k)
+
+        if self.fc_only:
+            vgg19_unit = nn.Sequential(*(list(self.vgg.features.pool1) + list(self.vgg.features.pool2) + list(self.vgg.features.pool3) + list(self.vgg.features.pool4) + list(self.vgg.features.pool5)))
+            self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit) ]) )
+        else:
+            if vgg19_unit[-1].__class__ == nn.ReLU:
+                vgg19_unit[-1] = nn.Tanh()
+            elif vgg19_unit[-2].__class__ == nn.ReLU:
+                vgg19_unit[-2] = nn.Tanh()
+
+            self.features = nn.Sequential( OrderedDict([ ('vgg19_unit', vgg19_unit), ('lcl', lcl_layer) ]) )
+
+        # Freeze the params of the previous layers of VGG19
+        #
+        if self.freeze_vgg:
+            for param in self.features.vgg19_unit.parameters():
+                param.requires_grad = False
+
+        if self.fc_only:
+            self.maxpool = nn.AdaptiveAvgPool2d((7, 7))
+            self.classifier = nn.Sequential(
+                nn.Linear(512*7*7, 4096),
+                nn.ReLU(True),
+                nn.Linear(4096, 4096),
+                nn.ReLU(True),
+                nn.Linear(4096, self.num_classes)
+            )
+
+        else:
+            fc_layer_input_size = fc_input_size(self.after_pooling)
+            fc_layer_output_size = fc_size(self.after_pooling)
+            nH, nW, _ = sizes_for_pooling_layer(self.after_pooling)
+
+            self.maxpool = nn.AdaptiveMaxPool2d((nH, nW))
+            self.classifier = nn.Sequential(
+                nn.Linear(fc_layer_input_size, fc_layer_output_size),
+                nn.ReLU(True),
+                nn.Linear(fc_layer_output_size, fc_layer_output_size),
+                nn.ReLU(True),
+                nn.Linear(fc_layer_output_size, self.num_classes)
+            )
 
 
 class VggFull(VGGReconstructionLCL):
@@ -594,10 +742,13 @@ class VggFull(VGGReconstructionLCL):
 
 
 class TinyCNN(nn.Module):
-    def __init__(self, conv_channels=10, num_classes=10, learning_rate=3e-4, run_identifier=''):
+    def __init__(self, conv_channels=10, num_classes=10, learning_rate=3e-4, run_identifier='', pretrained_model=None):
         super(TinyCNN, self).__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.run_identifier = run_identifier
+        self.no_improvement_count = 0
+        self.best_val_loss = 1000000
+        self.best_val_acc = 0
 
         self.conv = nn.Conv2d(in_channels=1, out_channels=conv_channels, padding=1, kernel_size=(3,3))
         self.conv_act = nn.Tanh()
@@ -606,6 +757,9 @@ class TinyCNN(nn.Module):
         self.fc1 = nn.Linear(in_features=conv_channels*14*14, out_features=100)
         self.fc1_act = nn.ReLU()
         self.fc2 = nn.Linear(in_features=100, out_features=num_classes)
+
+        if pretrained_model:
+            self.transfer_cnn_weights(pretrained_model)
 
         self.to(self.device)
 
@@ -629,24 +783,92 @@ class TinyCNN(nn.Module):
         x = self.fc1_act(x)
         return self.fc2(x)
 
+    def transfer_cnn_weights(self, pretrained_model):
+        if type(pretrained_model) != TinyCNN:
+            return
+
+        self.conv = pretrained_model.conv
+
+        for param in self.conv.parameters():
+            param.requires_grad = False
+
+    def train_optuna(self, train_loader, val_loader, trial, num_epochs=5):
+        self.train()
+
+        for epoch in range(num_epochs):
+            correct = 0
+            train_loss = 0
+            total = 0
+
+            for i, (images, labels) in tqdm(enumerate(train_loader, 0), total=len(train_loader), desc='Training'):
+                images = images.to(self.device)
+                labels = labels.to(self.device)
+
+                outputs = self(images)
+                loss = self.loss_fn(outputs, labels)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                _, preds = torch.max(outputs, 1)
+
+                current_iteration = epoch*len(train_loader)+i
+
+                correct += (preds == labels).sum().item()
+                total += labels.size(0)
+                train_loss += (loss.item() / labels.size(0))
+                train_acc = correct / total
+
+            val_acc, val_loss = self.test(val_loader)
+            self.train()
+
+            trial.report(val_loss, epoch)
+
+            if val_loss < self.best_val_loss:
+                self.no_improvement_count = 0
+                self.best_val_loss = val_loss
+                self.save(f"models/tiny_cnn/{self.run_identifier}__best.pt")
+                self.save(f"models/tiny_cnn/{self.run_identifier}__ep{epoch}.pt")
+            else:
+                self.no_improvement_count += 1
+
+            if val_acc > self.best_val_acc:
+                self.best_val_acc = val_acc
+
+            wandb_dict = {
+                'val_acc': val_acc,
+                'val_loss': val_loss,
+                'iteration': current_iteration,
+                'train_acc': train_acc,
+                'train_loss': train_loss / len(train_loader),
+                'best_val_acc': self.best_val_acc,
+                'best_val_loss': self.best_val_loss
+            }
+            print(wandb_dict) if wandb.run.disabled else wandb.log(wandb_dict)
+            
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+            if self.no_improvement_count == EARLY_STOPPING_LIMIT:
+                print('No improvements for 3 epochs, stopping training here.')
+                return self.best_val_loss
+
+        return self.best_val_loss
+
     def train_with_loader(self, train_loader, val_loader, test_loader=None, num_epochs=5):
+        self.train()
+
         for epoch in range(num_epochs):
             print(f"[INFO]: Epoch {epoch} of {num_epochs}")
             self.train()
 
             correct = 0
             total = 0
-            total_loss = 0
-            counter = 0
-
-            agg_correct = 0
-            agg_total = 0
-            agg_loss = 0
+            train_loss = 0
 
             # Training Loop
             for i, (images, labels) in tqdm(enumerate(train_loader, 0), total=len(train_loader), desc='Training'):
-                counter += 1
-                
                 images = images.to(self.device)
                 labels = labels.to(self.device)
 
@@ -661,41 +883,50 @@ class TinyCNN(nn.Module):
         
                 correct += (preds == labels).sum().item()
                 total += labels.size(0)
-                total_loss += (loss.item() / labels.size(0))
+                train_loss += (loss.item() / labels.size(0))
+                train_acc = correct / total
 
                 current_iteration = epoch*len(train_loader) + i
 
-                if current_iteration > 0 and (current_iteration % 1250) == 0:
-                    self.save(f"models/tiny_cnn/{self.run_identifier}__it{current_iteration}_e{epoch}.pt")
-                    val_acc, val_loss = self.test(val_loader)
-                    self.train()
-                    log_dict = { 'val_loss': val_loss, 'val_acc': val_acc, 'iteration': current_iteration }
 
-                    if test_loader:
-                        test_acc, test_loss = self.test(test_loader)
-                        self.train()
-                        log_dict['test_acc'] = test_acc
-                        log_dict['test_loss'] = test_loss
+            val_acc, val_loss = self.test(val_loader)
+            self.train()
+            wandb_dict = {
+                'val_acc': val_acc,
+                'val_loss': val_loss,
+                'iteration': current_iteration,
+                'epoch': epoch,
+                'train_acc': train_acc,
+                'train_loss': train_loss / len(train_loader),
+                'best_val_acc': self.best_val_acc,
+                'best_val_loss': self.best_val_loss,
+            }
 
-                    print(log_dict) if wandb.run.disabled else wandb.log(wandb_dict, commit=False)
+            if test_loader:
+                test_acc, test_loss = self.test(test_loader)
+                self.train()
+                wandb_dict['test_acc'] = test_acc
+                wandb_dict['test_loss'] = test_loss
 
-                if (current_iteration % 250) == 0:
-                    if i > 0:
-                        wandb_dict = { 'train_batch_loss': round(total_loss/250,4), 'train_batch_acc': round(correct/total,4), 'iteration': current_iteration }
-                        print(wandb_dict) if wandb.run.disabled else wandb.log(wandb_dict)
-
-                    agg_correct += correct
-                    agg_total += total
-                    agg_loss += total_loss
-
-                    correct = 0
-                    total = 0
-                    total_loss = 0
-                    counter = 0
-
-
-            wandb_dict = {'epoch': epoch, 'iteration': current_iteration, 'train_loss': agg_loss/len(train_loader), 'train_acc': agg_correct/agg_total}
             print(wandb_dict) if wandb.run.disabled else wandb.log(wandb_dict)
+
+            # Save best model
+            if val_loss < self.best_val_loss:
+                self.no_improvement_count = 0
+                self.best_val_loss = val_loss
+                self.save(f"models/tiny_cnn/{self.run_identifier}__best.pt")
+                self.save(f"models/tiny_cnn/{self.run_identifier}__ep{epoch}.pt")
+            else:
+                self.no_improvement_count += 1
+
+            if val_acc > self.best_val_acc:
+                self.best_val_acc = val_acc
+
+            if self.no_improvement_count == EARLY_STOPPING_LIMIT:
+                print('No improvements for 3 epochs, stopping training here.')
+                return self.best_val_loss
+
+        return self.best_val_loss
 
 
     def test(self, test_loader):
@@ -754,15 +985,6 @@ class TinyLateralNet(TinyCNN):
 
         self.loss_fn = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
-
-    def transfer_cnn_weights(self, pretrained_model):
-        if type(pretrained_model) != TinyCNN:
-            return
-
-        self.conv = pretrained_model.conv
-
-        for param in self.conv.parameters():
-            param.requires_grad = False
 
     def forward(self, x):
         x = self.conv(x)

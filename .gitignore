@@ -5,6 +5,7 @@ epoch_images/
 pytorch_patternnet/
 wandb/
 models/
+*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

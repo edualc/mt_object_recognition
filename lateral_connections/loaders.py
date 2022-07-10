@@ -12,7 +12,7 @@ def image_transform():
         transforms.Normalize(mean=(0.5), std=(0.5))
     ])
 
-def load_mnistc(dirname=None, train=False):
+def load_mnistc(dirname=None, train=False, transform=image_transform()):
     if dirname is None:
         dirname = 'line'
     root = 'images/mnist_c/' + dirname
@@ -22,10 +22,10 @@ def load_mnistc(dirname=None, train=False):
     images  = images.transpose(0, 3, 1, 2)[:, 0, ...]
 
     labels = np.load(root + '/' + dataset_type + '_labels.npy').reshape((images.shape[0],))
-    return MNISTCDataset(images, labels, transform=image_transform())
+    return MNISTCDataset(images, labels, transform=transform)
 
-def load_mnist(train=False):
-    return MNIST('images/mnist/', train=train, transform=image_transform(), download=True)
+def load_mnist(train=False, transform=image_transform()):
+    return MNIST('images/mnist/', train=train, transform=transform, download=True)
 
 def get_loaders(batch_size, corruption='gaussian_noise'):
     dataset = load_mnist(train=True)
